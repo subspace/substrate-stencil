@@ -7,12 +7,10 @@ use sc_service::{
 	config::Configuration, error::{Error as ServiceError},
 	RpcHandlers, TaskManager,
 };
-use sp_core::traits::BareCryptoStorePtr;
 use sp_inherents::InherentDataProviders;
 use sp_runtime::traits::Block as BlockT;
 use sc_executor::native_executor_instance;
 pub use sc_executor::NativeExecutor;
-use sc_finality_grandpa::{FinalityProofProvider as GrandpaFinalityProofProvider, SharedVoterState};
 use sc_network::NetworkService;
 
 // Our native executor instance.
@@ -26,8 +24,6 @@ native_executor_instance!(
 type FullClient = sc_service::TFullClient<Block, RuntimeApi, Executor>;
 type FullBackend = sc_service::TFullBackend<Block>;
 type FullSelectChain = sc_consensus::LongestChain<FullBackend, Block>;
-type FullGrandpaBlockImport =
-	sc_finality_grandpa::GrandpaBlockImport<FullBackend, Block, FullClient, FullSelectChain>;
 type LightClient = sc_service::TLightClient<Block, RuntimeApi, Executor>;
 
 pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponents<
@@ -40,13 +36,8 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 			sc_rpc::SubscriptionTaskExecutor,
 		) -> crate::rpc::IoHandler,
 		(
-			sc_consensus_babe::BabeBlockImport<Block, FullClient, FullGrandpaBlockImport>,
-			sc_finality_grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
+			sc_consensus_babe::BabeBlockImport<Block, FullClient, Arc<FullClient>>,
 			sc_consensus_babe::BabeLink<Block>,
-		),
-		(
-			SharedVoterState,
-			Arc<GrandpaFinalityProofProvider<FullBackend, Block>>,
 		),
 	)
 >, ServiceError> {
@@ -63,15 +54,9 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 		client.clone(),
 	);
 
-	let (grandpa_block_import, grandpa_link) = sc_finality_grandpa::block_import(
-		client.clone(), &(client.clone() as Arc<_>), select_chain.clone(),
-	)?;
-
-	let justification_import = grandpa_block_import.clone();
-
 	let (block_import, babe_link) = sc_consensus_babe::block_import(
 		sc_consensus_babe::Config::get_or_compute(&*client)?,
-		grandpa_block_import,
+		client.clone(),
 		client.clone(),
 	)?;
 
@@ -80,7 +65,7 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 	let import_queue = sc_consensus_babe::import_queue(
 		babe_link.clone(),
 		block_import.clone(),
-		Some(Box::new(justification_import)),
+		None,
 		None,
 		client.clone(),
 		select_chain.clone(),
@@ -90,18 +75,10 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 		sp_consensus::CanAuthorWithNativeVersion::new(client.executor().clone()),
 	)?;
 
-	let import_setup = (block_import, grandpa_link, babe_link);
+	let import_setup = (block_import, babe_link);
 
-	let (rpc_extensions_builder, rpc_setup) = {
-		let (_, grandpa_link, babe_link) = &import_setup;
-
-		let justification_stream = grandpa_link.justification_stream();
-		let shared_authority_set = grandpa_link.shared_authority_set().clone();
-		let shared_voter_state = SharedVoterState::empty();
-		let finality_proof_provider =
-			GrandpaFinalityProofProvider::new_for_service(backend.clone(), client.clone());
-
-		let rpc_setup = (shared_voter_state.clone(), finality_proof_provider.clone());
+	let (rpc_extensions_builder,) = {
+		let (_, babe_link) = &import_setup;
 
 		let babe_config = babe_link.config().clone();
 		let shared_epoch_changes = babe_link.epoch_changes().clone();
@@ -111,7 +88,7 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 		let select_chain = select_chain.clone();
 		let keystore = keystore.clone();
 
-		let rpc_extensions_builder = move |deny_unsafe, subscription_executor| {
+		let rpc_extensions_builder = move |deny_unsafe, _subscription_executor| {
 			let deps = crate::rpc::FullDeps {
 				client: client.clone(),
 				pool: pool.clone(),
@@ -122,25 +99,18 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 					shared_epoch_changes: shared_epoch_changes.clone(),
 					keystore: keystore.clone(),
 				},
-				grandpa: crate::rpc::GrandpaDeps {
-					shared_voter_state: shared_voter_state.clone(),
-					shared_authority_set: shared_authority_set.clone(),
-					justification_stream: justification_stream.clone(),
-					subscription_executor,
-					finality_provider: finality_proof_provider.clone(),
-				},
 			};
 
 			crate::rpc::create_full(deps)
 		};
 
-		(rpc_extensions_builder, rpc_setup)
+		(rpc_extensions_builder,)
 	};
 
 	Ok(sc_service::PartialComponents {
 		client, backend, task_manager, keystore, select_chain, import_queue, transaction_pool,
 		inherent_data_providers,
-		other: (rpc_extensions_builder, import_setup, rpc_setup)
+		other: (rpc_extensions_builder, import_setup)
 	})
 }
 
@@ -157,17 +127,15 @@ pub struct NewFullBase {
 pub fn new_full_base(
 	config: Configuration,
 	with_startup_data: impl FnOnce(
-		&sc_consensus_babe::BabeBlockImport<Block, FullClient, FullGrandpaBlockImport>,
+		&sc_consensus_babe::BabeBlockImport<Block, FullClient, Arc<FullClient>>,
 		&sc_consensus_babe::BabeLink<Block>,
 	)
 ) -> Result<NewFullBase, ServiceError> {
 	let sc_service::PartialComponents {
 		client, backend, mut task_manager, import_queue, keystore, select_chain, transaction_pool,
 		inherent_data_providers,
-		other: (rpc_extensions_builder, import_setup, rpc_setup),
+		other: (rpc_extensions_builder, import_setup),
 	} = new_partial(&config)?;
-
-	let (shared_voter_state, finality_proof_provider) = rpc_setup;
 
 	let (network, network_status_sinks, system_rpc_tx, network_starter) =
 		sc_service::build_network(sc_service::BuildNetworkParams {
@@ -179,7 +147,7 @@ pub fn new_full_base(
 			on_demand: None,
 			block_announce_validator_builder: None,
 			finality_proof_request_builder: None,
-			finality_proof_provider: Some(finality_proof_provider.clone()),
+			finality_proof_provider: None,
 		})?;
 
 	if config.offchain_worker.enabled {
@@ -190,8 +158,6 @@ pub fn new_full_base(
 
 	let role = config.role.clone();
 	let force_authoring = config.force_authoring;
-	let name = config.network.node_name.clone();
-	let enable_grandpa = !config.disable_grandpa;
 	let prometheus_registry = config.prometheus_registry().cloned();
 	let telemetry_connection_sinks = sc_service::TelemetryConnectionSinks::default();
 
@@ -211,7 +177,7 @@ pub fn new_full_base(
 		system_rpc_tx,
 	})?;
 
-	let (block_import, grandpa_link, babe_link) = import_setup;
+	let (block_import, babe_link) = import_setup;
 
 	(with_startup_data)(&block_import, &babe_link);
 
@@ -275,56 +241,6 @@ pub fn new_full_base(
 	// 	task_manager.spawn_handle().spawn("authority-discovery-worker", authority_discovery_worker);
 	// }
 
-	// if the node isn't actively participating in consensus then it doesn't
-	// need a keystore, regardless of which protocol we use below.
-	let keystore = if role.is_authority() {
-		Some(keystore as BareCryptoStorePtr)
-	} else {
-		None
-	};
-
-	let config = sc_finality_grandpa::Config {
-		// FIXME #1578 make this available through chainspec
-		gossip_duration: std::time::Duration::from_millis(333),
-		justification_period: 512,
-		name: Some(name),
-		observer_enabled: false,
-		keystore,
-		is_authority: role.is_network_authority(),
-	};
-
-	if enable_grandpa {
-		// start the full GRANDPA voter
-		// NOTE: non-authorities could run the GRANDPA observer protocol, but at
-		// this point the full voter should provide better guarantees of block
-		// and vote data availability than the observer. The observer has not
-		// been tested extensively yet and having most nodes in a network run it
-		// could lead to finality stalls.
-		let grandpa_config = sc_finality_grandpa::GrandpaParams {
-			config,
-			link: grandpa_link,
-			network: network.clone(),
-			inherent_data_providers: inherent_data_providers.clone(),
-			telemetry_on_connect: Some(telemetry_connection_sinks.on_connect_stream()),
-			voting_rule: sc_finality_grandpa::VotingRulesBuilder::default().build(),
-			prometheus_registry,
-			shared_voter_state,
-		};
-
-		// the GRANDPA voter task is considered infallible, i.e.
-		// if it fails we take down the service with it.
-		task_manager.spawn_essential_handle().spawn_blocking(
-			"grandpa-voter",
-			sc_finality_grandpa::run_grandpa_voter(grandpa_config)?
-		);
-	} else {
-		sc_finality_grandpa::setup_disabled_grandpa(
-			client.clone(),
-			&inherent_data_providers,
-			network.clone(),
-		)?;
-	}
-
 	network_starter.start_network();
 	Ok(NewFullBase {
 		task_manager, inherent_data_providers, client, network, network_status_sinks,
@@ -358,18 +274,9 @@ pub fn new_light_base(config: Configuration) -> Result<(
 		on_demand.clone(),
 	));
 
-	let grandpa_block_import = sc_finality_grandpa::light_block_import(
-		client.clone(), backend.clone(), &(client.clone() as Arc<_>),
-		Arc::new(on_demand.checker().clone()),
-	)?;
-
-	let finality_proof_import = grandpa_block_import.clone();
-	let finality_proof_request_builder =
-		finality_proof_import.create_finality_proof_request_builder();
-
 	let (babe_block_import, babe_link) = sc_consensus_babe::block_import(
 		sc_consensus_babe::Config::get_or_compute(&*client)?,
-		grandpa_block_import,
+		client.clone(),
 		client.clone(),
 	)?;
 
@@ -379,7 +286,7 @@ pub fn new_light_base(config: Configuration) -> Result<(
 		babe_link,
 		babe_block_import,
 		None,
-		Some(Box::new(finality_proof_import)),
+		None,
 		client.clone(),
 		select_chain.clone(),
 		inherent_data_providers.clone(),
@@ -387,9 +294,6 @@ pub fn new_light_base(config: Configuration) -> Result<(
 		config.prometheus_registry(),
 		sp_consensus::NeverCanAuthor,
 	)?;
-
-	let finality_proof_provider =
-		GrandpaFinalityProofProvider::new_for_service(backend.clone(), client.clone());
 
 	let (network, network_status_sinks, system_rpc_tx, network_starter) =
 		sc_service::build_network(sc_service::BuildNetworkParams {
@@ -400,8 +304,8 @@ pub fn new_light_base(config: Configuration) -> Result<(
 			import_queue,
 			on_demand: Some(on_demand.clone()),
 			block_announce_validator_builder: None,
-			finality_proof_request_builder: Some(finality_proof_request_builder),
-			finality_proof_provider: Some(finality_proof_provider),
+			finality_proof_request_builder: None,
+			finality_proof_provider: None,
 		})?;
 	network_starter.start_network();
 
