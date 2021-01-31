@@ -33,8 +33,8 @@ sc-basic-authorship = '0.8.1'
 sc-cli = { features = ['wasmtime'], version = '0.8.1' }
 sc-client-api = '2.0.1'
 sc-consensus = '0.8.1'
-sc-consensus-babe = '0.8.1'
-sc-consensus-babe-rpc = '0.8.1'
+sc-consensus-babe = { version = '0.8.1', path = '../client/consensus/babe' }
+sc-consensus-babe-rpc = { version = '0.8.1', path = '../client/consensus/babe/rpc' }
 sc-consensus-epochs = '0.8.1'
 sc-executor = { features = ['wasmtime'], version = '0.8.1' }
 sc-keystore = '2.0.1'
@@ -47,7 +47,7 @@ sp-api = '2.0.1'
 sp-block-builder = '2.0.1'
 sp-blockchain = '2.0.1'
 sp-consensus = '0.8.1'
-sp-consensus-babe = '0.8.1'
+sp-consensus-babe = { version = '0.8.1', path = '../primitives/consensus/babe' }
 sp-core = '2.0.1'
 sp-inherents = '2.0.1'
 sp-runtime = '2.0.1'

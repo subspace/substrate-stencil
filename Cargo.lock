@@ -3736,20 +3736,23 @@ dependencies = [
 [[package]]
 name = "pallet-babe"
 version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17e2d59cd974996dd81af46e14eefdf8183b39b11bcfd8efa2c2a3ca7b6d923b"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
  "pallet-authorship",
+ "pallet-balances",
+ "pallet-offences",
  "pallet-session",
+ "pallet-staking",
+ "pallet-staking-reward-curve",
  "pallet-timestamp",
  "parity-scale-codec",
  "serde",
  "sp-application-crypto",
  "sp-consensus-babe",
  "sp-consensus-vrf",
+ "sp-core",
  "sp-inherents",
  "sp-io",
  "sp-runtime",
@@ -5405,8 +5408,6 @@ dependencies = [
 [[package]]
 name = "sc-consensus-babe"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f1f50e27ce3cddd9bed5aeab449ab5f62dbdf8670cba6b1a012e07323ca89b3"
 dependencies = [
  "derive_more",
  "fork-tree",
@@ -5421,12 +5422,17 @@ dependencies = [
  "parking_lot 0.10.2",
  "pdqselect",
  "rand 0.7.3",
+ "rand_chacha 0.2.2",
  "retain_mut",
+ "sc-block-builder",
  "sc-client-api",
  "sc-consensus-epochs",
  "sc-consensus-slots",
  "sc-consensus-uncles",
+ "sc-executor",
  "sc-keystore",
+ "sc-network",
+ "sc-service",
  "sc-telemetry",
  "schnorrkel",
  "serde",
@@ -5440,36 +5446,41 @@ dependencies = [
  "sp-core",
  "sp-inherents",
  "sp-io",
+ "sp-keyring",
  "sp-runtime",
  "sp-timestamp",
+ "sp-tracing",
  "sp-utils",
  "sp-version",
  "substrate-prometheus-endpoint",
+ "tempfile",
 ]
 
 [[package]]
 name = "sc-consensus-babe-rpc"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "936655f94393a1ead8ac9108c4fdb7e8f3fbdd2a6506b6b9a46a6fee22b01b96"
 dependencies = [
  "derive_more",
  "futures 0.3.12",
  "jsonrpc-core",
  "jsonrpc-core-client",
  "jsonrpc-derive",
+ "sc-consensus",
  "sc-consensus-babe",
  "sc-consensus-epochs",
  "sc-keystore",
  "sc-rpc-api",
  "serde",
+ "serde_json",
  "sp-api",
  "sp-application-crypto",
  "sp-blockchain",
  "sp-consensus",
  "sp-consensus-babe",
  "sp-core",
+ "sp-keyring",
  "sp-runtime",
+ "tempfile",
 ]
 
 [[package]]
@@ -6534,8 +6545,6 @@ dependencies = [
 [[package]]
 name = "sp-consensus-babe"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "940734344fd43cc26618baf75638592e22ae609965c25280231843c3bf1425de"
 dependencies = [
  "merlin",
  "parity-scale-codec",
