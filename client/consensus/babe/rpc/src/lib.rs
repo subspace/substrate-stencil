@@ -70,17 +70,17 @@ pub trait BabeApi {
 	fn epoch_authorship(&self) -> FutureResult<HashMap<AuthorityId, EpochAuthorship>>;
 
 
-	#[rpc(name = "babe_blockProposal")]
-	fn block_proposal(&self) -> FutureResult<()>;
+	#[rpc(name = "babe_proposeProofOfSpace")]
+	fn propose_proof_of_space(&self) -> FutureResult<()>;
 
 
-	/// Test subscription
-	#[pubsub(subscription = "babe_test", subscribe, name = "babe_subscribeTest")]
-	fn subscribe_test(&self, metadata: Self::Metadata, subscriber: Subscriber<()>);
+	/// Slot info subscription
+	#[pubsub(subscription = "babe_slot_info", subscribe, name = "babe_subscribeSlotInfo")]
+	fn subscribe_slot_info(&self, metadata: Self::Metadata, subscriber: Subscriber<()>);
 
-	/// Unsubscribe from test subscription.
-	#[pubsub(subscription = "babe_test", unsubscribe, name = "babe_unsubscribeTest")]
-	fn unsubscribe_test(
+	/// Unsubscribe from slot info subscription.
+	#[pubsub(subscription = "babe_slot_info", unsubscribe, name = "babe_unsubscribeSlotInfo")]
+	fn unsubscribe_slot_info(
 		&self,
 		metadata: Option<Self::Metadata>,
 		id: SubscriptionId,
@@ -208,7 +208,7 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 		Box::new(future.compat())
 	}
 
-	fn block_proposal(&self) -> FutureResult<()> {
+	fn propose_proof_of_space(&self) -> FutureResult<()> {
 		if let Err(err) = self.deny_unsafe.check_if_safe() {
 			return Box::new(rpc_future::err(err.into()));
 		}
@@ -221,8 +221,8 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 		Box::new(future.compat())
 	}
 
-	fn subscribe_test(&self, _metadata: Self::Metadata, subscriber: Subscriber<()>) {
-		subscribe_test(
+	fn subscribe_slot_info(&self, _metadata: Self::Metadata, subscriber: Subscriber<()>) {
+		subscribe_slot_info(
 			&self.client,
 			&self.manager,
 			subscriber,
@@ -242,13 +242,13 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 		)
 	}
 
-	fn unsubscribe_test(&self, _metadata: Option<Self::Metadata>, id: SubscriptionId) -> RpcResult<bool> {
+	fn unsubscribe_slot_info(&self, _metadata: Option<Self::Metadata>, id: SubscriptionId) -> RpcResult<bool> {
 		unimplemented!()
 	}
 }
 
 /// Subscribe to new headers.
-fn subscribe_test<Block, Client, F, S, ERR>(
+fn subscribe_slot_info<Block, Client, F, S, ERR>(
 	client: &Arc<Client>,
 	subscriptions: &SubscriptionManager,
 	subscriber: Subscriber<()>,
