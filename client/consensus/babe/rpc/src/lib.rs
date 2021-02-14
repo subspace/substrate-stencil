@@ -18,6 +18,7 @@
 
 //! RPC api for babe.
 
+use std::io::Write;
 use sc_consensus_babe::{Epoch, authorship, Config};
 use futures::{FutureExt as _, TryFutureExt as _, SinkExt, TryStreamExt, compat::Compat as _};
 use jsonrpc_core::{
@@ -58,6 +59,12 @@ use log::warn;
 
 type FutureResult<T> = Box<dyn rpc_future::Future<Item = T, Error = RpcError> + Send>;
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SlotInfo {
+	pub slot_number: u64,
+	pub epoch_randomness: Vec<u8>,
+}
+
 /// Provides rpc methods for interacting with Babe.
 #[rpc]
 pub trait BabeApi {
@@ -76,7 +83,7 @@ pub trait BabeApi {
 
 	/// Slot info subscription
 	#[pubsub(subscription = "babe_slot_info", subscribe, name = "babe_subscribeSlotInfo")]
-	fn subscribe_slot_info(&self, metadata: Self::Metadata, subscriber: Subscriber<()>);
+	fn subscribe_slot_info(&self, metadata: Self::Metadata, subscriber: Subscriber<SlotInfo>);
 
 	/// Unsubscribe from slot info subscription.
 	#[pubsub(subscription = "babe_slot_info", unsubscribe, name = "babe_unsubscribeSlotInfo")]
@@ -221,19 +228,35 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 		Box::new(future.compat())
 	}
 
-	fn subscribe_slot_info(&self, _metadata: Self::Metadata, subscriber: Subscriber<()>) {
+	fn subscribe_slot_info(&self, _metadata: Self::Metadata, subscriber: Subscriber<SlotInfo>) {
 		subscribe_slot_info(
 			&self.client,
 			&self.manager,
 			subscriber,
 			|| {
-				let (mut tx, rx) = futures::channel::mpsc::unbounded::<Result<(), ()>>();
+				let (mut tx, rx) = futures::channel::mpsc::unbounded::<Result<SlotInfo, ()>>();
 				std::thread::spawn(move || {
+					let mut slot_number: u64 = 0;
 					loop {
 						std::thread::sleep(std::time::Duration::from_secs(1));
-						if let Err(_) = futures::executor::block_on(tx.send(Ok(()))) {
+						if let Err(_) = futures::executor::block_on(tx.send(Ok(SlotInfo {
+							slot_number,
+							epoch_randomness: {
+								// let bytes = slot_number.to_le_bytes();
+								// let mut epoch_randomness = vec![0u8, 32];
+								// {
+								// 	println!("mid {}", 32 - bytes.len());
+								// 	let (_, mut last) = epoch_randomness.split_at_mut(32 - bytes.len());
+								// 	last.write_all(&bytes).unwrap();
+								// }
+								// epoch_randomness
+								vec![1u8; 32]
+							}
+						}))) {
 							break;
 						}
+
+						slot_number += 1;
 					}
 				});
 
@@ -243,7 +266,7 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 	}
 
 	fn unsubscribe_slot_info(&self, _metadata: Option<Self::Metadata>, id: SubscriptionId) -> RpcResult<bool> {
-		unimplemented!()
+		Ok(self.manager.cancel(id))
 	}
 }
 
@@ -251,14 +274,14 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 fn subscribe_slot_info<Block, Client, F, S, ERR>(
 	client: &Arc<Client>,
 	subscriptions: &SubscriptionManager,
-	subscriber: Subscriber<()>,
+	subscriber: Subscriber<SlotInfo>,
 	stream: F,
 ) where
 	Block: BlockT + 'static,
 	Client: HeaderBackend<Block> + 'static,
 	F: FnOnce() -> S,
 	ERR: ::std::fmt::Debug,
-	S: Stream<Item=(), Error=ERR> + Send + 'static,
+	S: Stream<Item=SlotInfo, Error=ERR> + Send + 'static,
 {
 	subscriptions.add(subscriber, |sink| {
 		// send further subscriptions
@@ -269,7 +292,6 @@ fn subscribe_slot_info<Block, Client, F, S, ERR>(
 		sink
 			.sink_map_err(|e| warn!("Error sending notifications: {:?}", e))
 			.send_all(stream)
-			// we ignore the resulting Stream (if the first stream is over we are unsubscribed)
 			.map(|_| ())
 	});
 }
