@@ -70,6 +70,10 @@ pub trait BabeApi {
 	fn epoch_authorship(&self) -> FutureResult<HashMap<AuthorityId, EpochAuthorship>>;
 
 
+	#[rpc(name = "babe_blockProposal")]
+	fn block_proposal(&self) -> FutureResult<()>;
+
+
 	/// Test subscription
 	#[pubsub(subscription = "babe_test", subscribe, name = "babe_subscribeTest")]
 	fn subscribe_test(&self, metadata: Self::Metadata, subscriber: Subscriber<()>);
@@ -201,6 +205,19 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 			Ok(claims)
 		}.boxed();
 
+		Box::new(future.compat())
+	}
+
+	fn block_proposal(&self) -> FutureResult<()> {
+		if let Err(err) = self.deny_unsafe.check_if_safe() {
+			return Box::new(rpc_future::err(err.into()));
+		}
+
+		let future = async {
+			println!("Received block proposal message");
+			// TODO
+			Ok(())
+		}.boxed();
 		Box::new(future.compat())
 	}
 
