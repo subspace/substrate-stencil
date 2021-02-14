@@ -88,7 +88,7 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 		let select_chain = select_chain.clone();
 		let keystore = keystore.clone();
 
-		let rpc_extensions_builder = move |deny_unsafe, _subscription_executor| {
+		let rpc_extensions_builder = move |deny_unsafe, subscription_executor| {
 			let deps = crate::rpc::FullDeps {
 				client: client.clone(),
 				pool: pool.clone(),
@@ -98,6 +98,7 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 					babe_config: babe_config.clone(),
 					shared_epoch_changes: shared_epoch_changes.clone(),
 					keystore: keystore.clone(),
+					subscription_executor,
 				},
 			};
 

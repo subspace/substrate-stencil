@@ -21,6 +21,8 @@ use sp_consensus::SelectChain;
 use sp_consensus_babe::BabeApi;
 pub use sc_rpc_api::DenyUnsafe;
 use sp_transaction_pool::TransactionPool;
+use sc_client_api::ExecutorProvider;
+use sc_rpc::SubscriptionTaskExecutor;
 
 /// Extra dependencies for BABE.
 pub struct BabeDeps {
@@ -30,6 +32,8 @@ pub struct BabeDeps {
 	pub shared_epoch_changes: SharedEpochChanges<Block, Epoch>,
 	/// The keystore that manages the keys of the node.
 	pub keystore: KeyStorePtr,
+	/// Executor to drive the subscription manager in the Grandpa RPC handler.
+	pub subscription_executor: SubscriptionTaskExecutor,
 }
 
 /// Full client dependencies.
@@ -54,6 +58,7 @@ pub fn create_full<C, P, SC>(
 	deps: FullDeps<C, P, SC>,
 ) -> jsonrpc_core::IoHandler<sc_rpc_api::Metadata> where
 	C: ProvideRuntimeApi<Block>,
+	C: ExecutorProvider<Block>,
 	C: HeaderBackend<Block> + HeaderMetadata<Block, Error=BlockChainError> + 'static,
 	C: Send + Sync + 'static,
 	C::Api: substrate_frame_rpc_system::AccountNonceApi<Block, AccountId, Index>,
@@ -79,6 +84,7 @@ pub fn create_full<C, P, SC>(
 		keystore,
 		babe_config,
 		shared_epoch_changes,
+		subscription_executor,
 	} = babe;
 
 	io.extend_with(
@@ -93,12 +99,13 @@ pub fn create_full<C, P, SC>(
 	io.extend_with(
 		sc_consensus_babe_rpc::BabeApi::to_delegate(
 			sc_consensus_babe_rpc::BabeRpcHandler::new(
-				client,
+				client.clone(),
 				shared_epoch_changes,
 				keystore,
 				babe_config,
 				select_chain,
 				deny_unsafe,
+				subscription_executor,
 			),
 		)
 	);

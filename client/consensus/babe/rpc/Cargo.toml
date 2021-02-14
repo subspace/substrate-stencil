@@ -17,7 +17,9 @@ sc-consensus-babe = { version = "0.8.1", path = ".." }
 sc-rpc-api = { version = "0.8.0" }
 jsonrpc-core = "15.0.0"
 jsonrpc-core-client = "15.0.0"
+jsonrpc-pubsub = "15.0.0"
 jsonrpc-derive = "15.0.0"
+log = "0.4.14"
 sp-consensus-babe = { version = "0.8.1", path = "../../../../primitives/consensus/babe" }
 serde = { version = "1.0.104", features=["derive"] }
 sp-blockchain = { version = "2.0.0" }
