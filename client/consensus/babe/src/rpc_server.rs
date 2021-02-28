@@ -21,6 +21,7 @@ struct Solution {
     nonce: u32,
     encoding: Vec<u8>,
     signature: [u8; 32],
+    tag: [u8; 32],
 }
 
 #[derive(Debug, Deserialize)]
