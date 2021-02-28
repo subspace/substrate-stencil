@@ -125,6 +125,7 @@ use sp_blockchain::{
 use schnorrkel::SignatureError;
 use codec::{Encode, Decode};
 use sp_api::ApiExt;
+use crate::rpc::RpcServer;
 
 mod verification;
 mod migration;
@@ -133,6 +134,7 @@ pub mod aux_schema;
 pub mod authorship;
 #[cfg(test)]
 mod tests;
+mod rpc;
 
 /// BABE epoch information
 #[derive(Decode, Encode, PartialEq, Eq, Clone, Debug)]
@@ -392,6 +394,9 @@ pub fn start_babe<B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	let config = babe_link.config;
 	let slot_notification_sinks = Arc::new(Mutex::new(Vec::new()));
 
+	let rpc_server = RpcServer::new::<B>(slot_notification_sinks.clone())
+		.expect("Failed to start RPC server");
+
 	let worker = BabeSlotWorker {
 		client: client.clone(),
 		block_import: Arc::new(Mutex::new(block_import)),
@@ -402,6 +407,7 @@ pub fn start_babe<B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 		epoch_changes: babe_link.epoch_changes.clone(),
 		slot_notification_sinks: slot_notification_sinks.clone(),
 		config: config.clone(),
+		rpc_server,
 	};
 
 	register_babe_inherent_data_provider(&inherent_data_providers, config.slot_duration())?;
@@ -472,6 +478,7 @@ struct BabeSlotWorker<B: BlockT, C, E, I, SO> {
 	epoch_changes: SharedEpochChanges<B, Epoch>,
 	slot_notification_sinks: SlotNotificationSinks<B>,
 	config: Config,
+	rpc_server: RpcServer,
 }
 
 impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlotWorker<B, C, E, I, SO> where
