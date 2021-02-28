@@ -25,7 +25,6 @@ use sp_core::{crypto::Pair, vrf::make_transcript as transcript_from_data};
 use sp_consensus_babe::{
 	AuthorityPair,
 	SlotNumber,
-	AllowedSlots,
 	make_transcript,
 	make_transcript_data,
 };

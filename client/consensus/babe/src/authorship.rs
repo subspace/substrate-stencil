@@ -25,11 +25,10 @@ use sp_consensus_babe::{
 	make_transcript_data,
 };
 use sp_consensus_babe::digests::{
-	PreDigest, PrimaryPreDigest, SecondaryPlainPreDigest, SecondaryVRFPreDigest,
+	PreDigest, PrimaryPreDigest,
 };
 use sp_consensus_vrf::schnorrkel::{VRFOutput, VRFProof};
-use sp_core::{U256, blake2_256, crypto::Public, traits::BareCryptoStore};
-use codec::Encode;
+use sp_core::{crypto::Public, traits::BareCryptoStore};
 use schnorrkel::{
 	keys::PublicKey,
 	vrf::VRFInOut,
@@ -100,93 +99,6 @@ pub(super) fn check_primary_threshold(inout: &VRFInOut, threshold: u128) -> bool
 	u128::from_le_bytes(inout.make_bytes::<[u8; 16]>(BABE_VRF_PREFIX)) < threshold
 }
 
-/// Get the expected secondary author for the given slot and with given
-/// authorities. This should always assign the slot to some authority unless the
-/// authorities list is empty.
-pub(super) fn secondary_slot_author(
-	slot_number: u64,
-	authorities: &[(AuthorityId, BabeAuthorityWeight)],
-	randomness: [u8; 32],
-) -> Option<&AuthorityId> {
-	if authorities.is_empty() {
-		return None;
-	}
-
-	let rand = U256::from((randomness, slot_number).using_encoded(blake2_256));
-
-	let authorities_len = U256::from(authorities.len());
-	let idx = rand % authorities_len;
-
-	let expected_author = authorities.get(idx.as_u32() as usize)
-		.expect("authorities not empty; index constrained to list length; \
-				this is a valid index; qed");
-
-	Some(&expected_author.0)
-}
-
-/// Claim a secondary slot if it is our turn to propose, returning the
-/// pre-digest to use when authoring the block, or `None` if it is not our turn
-/// to propose.
-fn claim_secondary_slot(
-	slot_number: SlotNumber,
-	epoch: &Epoch,
-	keys: &[(AuthorityId, usize)],
-	keystore: &KeyStorePtr,
-	author_secondary_vrf: bool,
-) -> Option<(PreDigest, AuthorityId)> {
-	let Epoch { authorities, randomness, epoch_index, .. } = epoch;
-
-	if authorities.is_empty() {
-		return None;
-	}
-
-	let expected_author = super::authorship::secondary_slot_author(
-		slot_number,
-		authorities,
-		*randomness,
-	)?;
-
-	for (authority_id, authority_index) in keys {
-		if authority_id == expected_author {
-			let pre_digest = if author_secondary_vrf {
-				let transcript_data = super::authorship::make_transcript_data(
-					randomness,
-					slot_number,
-					*epoch_index,
-				);
-				let result = keystore.read().sr25519_vrf_sign(
-					AuthorityId::ID,
-					authority_id.as_ref(),
-					transcript_data,
-				);
-				if let Ok(signature)  = result {
-					Some(PreDigest::SecondaryVRF(SecondaryVRFPreDigest {
-						slot_number,
-						vrf_output: VRFOutput(signature.output),
-						vrf_proof: VRFProof(signature.proof),
-						authority_index: *authority_index as u32,
-					}))
-				} else {
-					None
-				}
-			} else if keystore.read().has_keys(&[(authority_id.to_raw_vec(), AuthorityId::ID)]) {
-				Some(PreDigest::SecondaryPlain(SecondaryPlainPreDigest {
-					slot_number,
-					authority_index: *authority_index as u32,
-				}))
-			} else {
-				None
-			};
-
-			if let Some(pre_digest) = pre_digest {
-				return Some((pre_digest, authority_id.clone()));
-			}
-		}
-	}
-
-	None
-}
-
 /// Tries to claim the given slot number. This method starts by trying to claim
 /// a primary VRF based slot. If we are not able to claim it, then if we have
 /// secondary slots enabled for the given epoch, we will fallback to trying to
@@ -212,21 +124,6 @@ pub fn claim_slot_using_keys(
 	keys: &[(AuthorityId, usize)],
 ) -> Option<(PreDigest, AuthorityId)> {
 	claim_primary_slot(slot_number, epoch, epoch.config.c, keystore, &keys)
-		.or_else(|| {
-			if epoch.config.allowed_slots.is_secondary_plain_slots_allowed() ||
-				epoch.config.allowed_slots.is_secondary_vrf_slots_allowed()
-			{
-				claim_secondary_slot(
-					slot_number,
-					&epoch,
-					keys,
-					keystore,
-					epoch.config.allowed_slots.is_secondary_vrf_slots_allowed(),
-				)
-			} else {
-				None
-			}
-		})
 }
 
 /// Claim a primary slot if it is our turn.  Returns `None` if it is not our turn.

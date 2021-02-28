@@ -1,4 +1,4 @@
-use jsonrpc_pubsub::{PubSubHandler, Session, PubSubMetadata, SubscriptionId, Sink, Subscriber, SinkResult};
+use jsonrpc_pubsub::{PubSubHandler, Session, PubSubMetadata, SubscriptionId, Subscriber, SinkResult};
 use jsonrpc_core::{MetaIoHandler, Middleware, Params, Value};
 use jsonrpc_ws_server::{ServerBuilder, RequestContext, Server};
 use std::sync::Arc;
@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use futures::{future, FutureExt, StreamExt, SinkExt};
 use log::{debug, warn};
-use crate::{Epoch, SlotNumber, PreDigest, AuthorityId};
+use crate::{Epoch, SlotNumber};
 use serde::{Serialize, Deserialize};
 use futures::channel::mpsc;
 use std::time::Duration;
@@ -16,12 +16,12 @@ use futures::future::Either;
 const SOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Deserialize)]
-struct Solution {
-    public_key: [u8; 32],
-    nonce: u32,
-    encoding: Vec<u8>,
-    signature: [u8; 32],
-    tag: [u8; 32],
+pub struct Solution {
+    pub public_key: [u8; 32],
+    pub nonce: u32,
+    pub encoding: Vec<u8>,
+    pub signature: [u8; 32],
+    pub tag: [u8; 32],
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,7 +82,7 @@ impl RpcServer {
         &self,
         slot_number: SlotNumber,
         epoch: &Epoch,
-    ) -> Option<(PreDigest, AuthorityId)> {
+    ) -> Option<Solution> {
         let value = serde_json::to_value(SlotInfo {
             slot_number,
             epoch_randomness: epoch.randomness.to_vec(),
@@ -125,11 +125,10 @@ impl RpcServer {
             .join()
             .ok()
             .flatten();
-        println!("Solution: {:?}", solution);
 
         self.proof_requests.lock().remove(&slot_number);
 
-        None
+        solution
     }
 }
 

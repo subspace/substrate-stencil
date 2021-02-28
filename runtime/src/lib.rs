@@ -841,7 +841,6 @@ impl_runtime_apis! {
 				c: PRIMARY_PROBABILITY,
 				genesis_authorities: Babe::authorities(),
 				randomness: Babe::randomness(),
-				allowed_slots: sp_consensus_babe::AllowedSlots::PrimaryAndSecondaryPlainSlots,
 			}
 		}
 

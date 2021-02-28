@@ -57,7 +57,6 @@ impl EpochV0 {
 			randomness: self.randomness,
 			config: BabeEpochConfiguration {
 				c: config.c,
-				allowed_slots: config.allowed_slots,
 			},
 		}
 	}

@@ -18,24 +18,13 @@
 
 //! RPC api for babe.
 
-use std::io::Write;
 use sc_consensus_babe::{Epoch, authorship, Config};
-use futures::{FutureExt as _, TryFutureExt as _, SinkExt, TryStreamExt, compat::Compat as _};
+use futures::{FutureExt as _, TryFutureExt as _};
 use jsonrpc_core::{
 	Error as RpcError,
 	futures::future as rpc_future,
-	Result as RpcResult,
-	futures::{
-		stream,
-		Future,
-		Sink,
-		Stream,
-		future::Future as Future01,
-		future::Executor as Executor01,
-	},
 };
 use jsonrpc_derive::rpc;
-use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId, manager::SubscriptionManager};
 use sc_consensus_epochs::{descendent_query, Epoch as EpochT, SharedEpochChanges};
 use sp_consensus_babe::{
 	AuthorityId,
@@ -55,7 +44,6 @@ use sp_runtime::traits::{Block as BlockT, Header as _};
 use sp_consensus::{SelectChain, Error as ConsensusError};
 use sp_blockchain::{HeaderBackend, HeaderMetadata, Error as BlockChainError};
 use std::{collections::HashMap, sync::Arc};
-use log::warn;
 
 type FutureResult<T> = Box<dyn rpc_future::Future<Item = T, Error = RpcError> + Send>;
 
@@ -75,23 +63,6 @@ pub trait BabeApi {
 	/// with the keys in the keystore.
 	#[rpc(name = "babe_epochAuthorship")]
 	fn epoch_authorship(&self) -> FutureResult<HashMap<AuthorityId, EpochAuthorship>>;
-
-
-	#[rpc(name = "babe_proposeProofOfSpace")]
-	fn propose_proof_of_space(&self) -> FutureResult<()>;
-
-
-	/// Slot info subscription
-	#[pubsub(subscription = "babe_slot_info", subscribe, name = "babe_subscribeSlotInfo")]
-	fn subscribe_slot_info(&self, metadata: Self::Metadata, subscriber: Subscriber<SlotInfo>);
-
-	/// Unsubscribe from slot info subscription.
-	#[pubsub(subscription = "babe_slot_info", unsubscribe, name = "babe_unsubscribeSlotInfo")]
-	fn unsubscribe_slot_info(
-		&self,
-		metadata: Option<Self::Metadata>,
-		id: SubscriptionId,
-	) -> RpcResult<bool>;
 }
 
 /// Implements the BabeRpc trait for interacting with Babe.
@@ -108,24 +79,18 @@ pub struct BabeRpcHandler<B: BlockT, C, SC> {
 	select_chain: SC,
 	/// Whether to deny unsafe calls
 	deny_unsafe: DenyUnsafe,
-	manager: SubscriptionManager,
 }
 
 impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 	/// Creates a new instance of the BabeRpc handler.
-	pub fn new<E>(
+	pub fn new(
 		client: Arc<C>,
 		shared_epoch_changes: SharedEpochChanges<B, Epoch>,
 		keystore: KeyStorePtr,
 		babe_config: Config,
 		select_chain: SC,
 		deny_unsafe: DenyUnsafe,
-		executor: E,
-	) -> Self
-	where
-		E: Executor01<Box<dyn Future01<Item = (), Error = ()> + Send>> + Send + Sync + 'static,
-	{
-		let manager = SubscriptionManager::new(Arc::new(executor));
+	) -> Self {
 		Self {
 			client,
 			shared_epoch_changes,
@@ -133,7 +98,6 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 			babe_config,
 			select_chain,
 			deny_unsafe,
-			manager,
 		}
 	}
 }
@@ -202,9 +166,6 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 						PreDigest::SecondaryPlain { .. } => {
 							claims.entry(key).or_default().secondary.push(slot_number);
 						}
-						PreDigest::SecondaryVRF { .. } => {
-							claims.entry(key).or_default().secondary_vrf.push(slot_number);
-						},
 					};
 				}
 			}
@@ -214,86 +175,6 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 
 		Box::new(future.compat())
 	}
-
-	fn propose_proof_of_space(&self) -> FutureResult<()> {
-		if let Err(err) = self.deny_unsafe.check_if_safe() {
-			return Box::new(rpc_future::err(err.into()));
-		}
-
-		let future = async {
-			println!("Received block proposal message");
-			// TODO
-			Ok(())
-		}.boxed();
-		Box::new(future.compat())
-	}
-
-	fn subscribe_slot_info(&self, _metadata: Self::Metadata, subscriber: Subscriber<SlotInfo>) {
-		subscribe_slot_info(
-			&self.client,
-			&self.manager,
-			subscriber,
-			|| {
-				let (mut tx, rx) = futures::channel::mpsc::unbounded::<Result<SlotInfo, ()>>();
-				std::thread::spawn(move || {
-					let mut slot_number: u64 = 0;
-					loop {
-						std::thread::sleep(std::time::Duration::from_secs(1));
-						if let Err(_) = futures::executor::block_on(tx.send(Ok(SlotInfo {
-							slot_number,
-							epoch_randomness: {
-								// let bytes = slot_number.to_le_bytes();
-								// let mut epoch_randomness = vec![0u8, 32];
-								// {
-								// 	println!("mid {}", 32 - bytes.len());
-								// 	let (_, mut last) = epoch_randomness.split_at_mut(32 - bytes.len());
-								// 	last.write_all(&bytes).unwrap();
-								// }
-								// epoch_randomness
-								vec![1u8; 32]
-							}
-						}))) {
-							break;
-						}
-
-						slot_number += 1;
-					}
-				});
-
-				rx.compat()
-			},
-		)
-	}
-
-	fn unsubscribe_slot_info(&self, _metadata: Option<Self::Metadata>, id: SubscriptionId) -> RpcResult<bool> {
-		Ok(self.manager.cancel(id))
-	}
-}
-
-/// Subscribe to new headers.
-fn subscribe_slot_info<Block, Client, F, S, ERR>(
-	client: &Arc<Client>,
-	subscriptions: &SubscriptionManager,
-	subscriber: Subscriber<SlotInfo>,
-	stream: F,
-) where
-	Block: BlockT + 'static,
-	Client: HeaderBackend<Block> + 'static,
-	F: FnOnce() -> S,
-	ERR: ::std::fmt::Debug,
-	S: Stream<Item=SlotInfo, Error=ERR> + Send + 'static,
-{
-	subscriptions.add(subscriber, |sink| {
-		// send further subscriptions
-		let stream = stream()
-			.map(|res| Ok(res))
-			.map_err(|e| warn!("Block notification stream error: {:?}", e));
-
-		sink
-			.sink_map_err(|e| warn!("Error sending notifications: {:?}", e))
-			.send_all(stream)
-			.map(|_| ())
-	});
 }
 
 /// Holds information about the `slot_number`'s that can be claimed by a given key.

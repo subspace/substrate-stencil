@@ -162,10 +162,6 @@ pub struct BabeGenesisConfigurationV1 {
 
 	/// The randomness for the genesis epoch.
 	pub randomness: Randomness,
-
-	/// Whether this chain should run with secondary slots, which are assigned
-	/// in round-robin manner.
-	pub secondary_slots: bool,
 }
 
 impl From<BabeGenesisConfigurationV1> for BabeGenesisConfiguration {
@@ -176,11 +172,6 @@ impl From<BabeGenesisConfigurationV1> for BabeGenesisConfiguration {
 			c: v1.c,
 			genesis_authorities: v1.genesis_authorities,
 			randomness: v1.randomness,
-			allowed_slots: if v1.secondary_slots {
-				AllowedSlots::PrimaryAndSecondaryPlainSlots
-			} else {
-				AllowedSlots::PrimarySlots
-			},
 		}
 	}
 }
@@ -210,32 +201,6 @@ pub struct BabeGenesisConfiguration {
 
 	/// The randomness for the genesis epoch.
 	pub randomness: Randomness,
-
-	/// Type of allowed slots.
-	pub allowed_slots: AllowedSlots,
-}
-
-/// Types of allowed slots.
-#[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
-pub enum AllowedSlots {
-	/// Only allow primary slots.
-	PrimarySlots,
-	/// Allow primary and secondary plain slots.
-	PrimaryAndSecondaryPlainSlots,
-	/// Allow primary and secondary VRF slots.
-	PrimaryAndSecondaryVRFSlots,
-}
-
-impl AllowedSlots {
-	/// Whether plain secondary slots are allowed.
-	pub fn is_secondary_plain_slots_allowed(&self) -> bool {
-		*self == Self::PrimaryAndSecondaryPlainSlots
-	}
-
-	/// Whether VRF secondary slots are allowed.
-	pub fn is_secondary_vrf_slots_allowed(&self) -> bool {
-		*self == Self::PrimaryAndSecondaryVRFSlots
-	}
 }
 
 #[cfg(feature = "std")]
@@ -257,10 +222,6 @@ pub struct BabeEpochConfiguration {
 	/// In the threshold formula calculation, `1 - c` represents the probability
 	/// of a slot being empty.
 	pub c: (u64, u64),
-
-	/// Whether this chain should run with secondary slots, which are assigned
-	/// in round-robin manner.
-	pub allowed_slots: AllowedSlots,
 }
 
 /// Verifies the equivocation proof by making sure that: both headers have

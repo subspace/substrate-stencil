@@ -18,7 +18,7 @@
 //! Private implementation details of BABE digests.
 
 use super::{
-	AllowedSlots, AuthorityId, AuthorityIndex, AuthoritySignature, BabeAuthorityWeight,
+	AuthorityId, AuthorityIndex, AuthoritySignature, BabeAuthorityWeight,
 	BabeEpochConfiguration, SlotNumber, BABE_ENGINE_ID,
 };
 use codec::{Codec, Decode, Encode};
@@ -78,9 +78,6 @@ pub enum PreDigest {
 	/// A secondary deterministic slot assignment.
 	#[codec(index = "2")]
 	SecondaryPlain(SecondaryPlainPreDigest),
-	/// A secondary deterministic slot assignment with VRF outputs.
-	#[codec(index = "3")]
-	SecondaryVRF(SecondaryVRFPreDigest),
 }
 
 impl PreDigest {
@@ -89,7 +86,6 @@ impl PreDigest {
 		match self {
 			PreDigest::Primary(primary) => primary.authority_index,
 			PreDigest::SecondaryPlain(secondary) => secondary.authority_index,
-			PreDigest::SecondaryVRF(secondary) => secondary.authority_index,
 		}
 	}
 
@@ -98,7 +94,6 @@ impl PreDigest {
 		match self {
 			PreDigest::Primary(primary) => primary.slot_number,
 			PreDigest::SecondaryPlain(secondary) => secondary.slot_number,
-			PreDigest::SecondaryVRF(secondary) => secondary.slot_number,
 		}
 	}
 
@@ -107,7 +102,7 @@ impl PreDigest {
 	pub fn added_weight(&self) -> crate::BabeBlockWeight {
 		match self {
 			PreDigest::Primary(_) => 1,
-			PreDigest::SecondaryPlain(_) | PreDigest::SecondaryVRF(_) => 0,
+			PreDigest::SecondaryPlain(_) => 0,
 		}
 	}
 }
@@ -132,16 +127,14 @@ pub enum NextConfigDescriptor {
 	V1 {
 		/// Value of `c` in `BabeEpochConfiguration`.
 		c: (u64, u64),
-		/// Value of `allowed_slots` in `BabeEpochConfiguration`.
-		allowed_slots: AllowedSlots,
 	}
 }
 
 impl From<NextConfigDescriptor> for BabeEpochConfiguration {
 	fn from(desc: NextConfigDescriptor) -> Self {
 		match desc {
-			NextConfigDescriptor::V1 { c, allowed_slots } =>
-				Self { c, allowed_slots },
+			NextConfigDescriptor::V1 { c } =>
+				Self { c },
 		}
 	}
 }

@@ -195,7 +195,6 @@ impl Epoch {
 			randomness: genesis_config.randomness,
 			config: BabeEpochConfiguration {
 				c: genesis_config.c,
-				allowed_slots: genesis_config.allowed_slots,
 			},
 		}
 	}
@@ -231,10 +230,6 @@ enum Error<B: BlockT> {
 	SecondarySlotAssignmentsDisabled,
 	#[display(fmt = "Bad signature on {:?}", _0)]
 	BadSignature(B::Hash),
-	#[display(fmt = "Invalid author: Expected secondary author: {:?}, got: {:?}.", _0, _1)]
-	InvalidAuthor(AuthorityId, AuthorityId),
-	#[display(fmt = "No secondary author expected.")]
-	NoSecondaryAuthorExpected,
 	#[display(fmt = "VRF verification of block by author {:?} failed: threshold {} exceeded", _0, _1)]
 	VRFVerificationOfBlockFailed(AuthorityId, u128),
 	#[display(fmt = "VRF verification failed: {:?}", _0)]

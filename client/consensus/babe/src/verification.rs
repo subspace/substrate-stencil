@@ -19,13 +19,13 @@ use sp_runtime::{traits::Header, traits::DigestItemFor};
 use sp_core::{Pair, Public};
 use sp_consensus_babe::{make_transcript, AuthoritySignature, SlotNumber, AuthorityPair, AuthorityId};
 use sp_consensus_babe::digests::{
-	PreDigest, PrimaryPreDigest, SecondaryPlainPreDigest, SecondaryVRFPreDigest,
+	PreDigest, PrimaryPreDigest,
 	CompatibleDigestItem
 };
 use sc_consensus_slots::CheckedHeader;
 use log::{debug, trace};
 use super::{find_pre_digest, babe_err, Epoch, BlockT, Error};
-use super::authorship::{calculate_primary_threshold, check_primary_threshold, secondary_slot_author};
+use super::authorship::{calculate_primary_threshold, check_primary_threshold};
 
 /// BABE verification parameters
 pub(super) struct VerificationParams<'a, B: 'a + BlockT> {
@@ -103,24 +103,6 @@ pub(super) fn check_header<B: BlockT + Sized>(
 				epoch.config.c,
 			)?;
 		},
-		PreDigest::SecondaryPlain(secondary) if epoch.config.allowed_slots.is_secondary_plain_slots_allowed() => {
-			debug!(target: "babe", "Verifying Secondary plain block");
-			check_secondary_plain_header::<B>(
-				pre_hash,
-				secondary,
-				sig,
-				&epoch,
-			)?;
-		},
-		PreDigest::SecondaryVRF(secondary) if epoch.config.allowed_slots.is_secondary_vrf_slots_allowed() => {
-			debug!(target: "babe", "Verifying Secondary VRF block");
-			check_secondary_vrf_header::<B>(
-				pre_hash,
-				secondary,
-				sig,
-				&epoch,
-			)?;
-		},
 		_ => {
 			return Err(babe_err(Error::SecondarySlotAssignmentsDisabled));
 		}
@@ -181,76 +163,5 @@ fn check_primary_header<B: BlockT + Sized>(
 		Ok(())
 	} else {
 		Err(babe_err(Error::BadSignature(pre_hash)))
-	}
-}
-
-/// Check a secondary slot proposal header. We validate that the given header is
-/// properly signed by the expected authority, which we have a deterministic way
-/// of computing. Additionally, the weight of this block must stay the same
-/// compared to its parent since it is a secondary block.
-fn check_secondary_plain_header<B: BlockT>(
-	pre_hash: B::Hash,
-	pre_digest: &SecondaryPlainPreDigest,
-	signature: AuthoritySignature,
-	epoch: &Epoch,
-) -> Result<(), Error<B>> {
-	// check the signature is valid under the expected authority and
-	// chain state.
-	let expected_author = secondary_slot_author(
-		pre_digest.slot_number,
-		&epoch.authorities,
-		epoch.randomness,
-	).ok_or_else(|| Error::NoSecondaryAuthorExpected)?;
-
-	let author = &epoch.authorities[pre_digest.authority_index as usize].0;
-
-	if expected_author != author {
-		return Err(Error::InvalidAuthor(expected_author.clone(), author.clone()));
-	}
-
-	if AuthorityPair::verify(&signature, pre_hash.as_ref(), author) {
-		Ok(())
-	} else {
-		Err(Error::BadSignature(pre_hash))
-	}
-}
-
-/// Check a secondary VRF slot proposal header.
-fn check_secondary_vrf_header<B: BlockT>(
-	pre_hash: B::Hash,
-	pre_digest: &SecondaryVRFPreDigest,
-	signature: AuthoritySignature,
-	epoch: &Epoch,
-) -> Result<(), Error<B>> {
-	// check the signature is valid under the expected authority and
-	// chain state.
-	let expected_author = secondary_slot_author(
-		pre_digest.slot_number,
-		&epoch.authorities,
-		epoch.randomness,
-	).ok_or_else(|| Error::NoSecondaryAuthorExpected)?;
-
-	let author = &epoch.authorities[pre_digest.authority_index as usize].0;
-
-	if expected_author != author {
-		return Err(Error::InvalidAuthor(expected_author.clone(), author.clone()));
-	}
-
-	if AuthorityPair::verify(&signature, pre_hash.as_ref(), author) {
-		let transcript = make_transcript(
-			&epoch.randomness,
-			pre_digest.slot_number,
-			epoch.epoch_index,
-		);
-
-		schnorrkel::PublicKey::from_bytes(author.as_slice()).and_then(|p| {
-			p.vrf_verify(transcript, &pre_digest.vrf_output, &pre_digest.vrf_proof)
-		}).map_err(|s| {
-			babe_err(Error::VRFVerificationFailed(s))
-		})?;
-
-		Ok(())
-	} else {
-		Err(Error::BadSignature(pre_hash))
 	}
 }
