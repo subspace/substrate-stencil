@@ -105,6 +105,9 @@ impl RpcServer {
             .ok()
             .flatten();
         println!("Solution: {:?}", solution);
+
+        self.proof_requests.lock().remove(&slot_number);
+
         // TODO: Receive from RPC ^
         None
     }
