@@ -36,7 +36,28 @@ impl RpcServer {
         io.add_sync_method("babe_proposeProofOfSpace", move |_params: Params| {
             Ok(Value::String("TODO".to_string()))
         });
-        add_subscriptions::<_, _, B>(&mut io, slot_notification_sinks);
+        let slot_info_sinks = add_slot_info_subscriptions::<_, _, B>(&mut io);
+
+        std::thread::spawn(move || {
+            futures::executor::block_on(async move {
+                const CHANNEL_BUFFER_SIZE: usize = 1024;
+
+                let (sink, mut stream) = channel(CHANNEL_BUFFER_SIZE);
+                slot_notification_sinks.lock().push(sink);
+
+                while let Some((slot_number, epoch)) = stream.next().await {
+                    if let ViableEpochDescriptor::Signaled(identifier, _header) = epoch {
+                        let params = Params::Array(vec![serde_json::to_value(SlotInfo {
+                            slot_number,
+                            epoch_randomness: identifier.hash.encode(),
+                        }).unwrap()]);
+                        for sink in slot_info_sinks.lock().values() {
+                            let _ = sink.notify(params.clone());
+                        }
+                    }
+                }
+            });
+        });
 
         ServerBuilder::new(io)
             .session_meta_extractor(|context: &RequestContext| {
@@ -49,10 +70,9 @@ impl RpcServer {
     }
 }
 
-fn add_subscriptions<T, S, B>(
+fn add_slot_info_subscriptions<T, S, B>(
     io: &mut PubSubHandler<T, S>,
-    slot_notification_sinks: Arc<Mutex<Vec<Sender<(u64, ViableEpochDescriptor<B::Hash, NumberFor<B>, Epoch>)>>>>,
-)
+) -> Arc<Mutex<HashMap<SubscriptionId, Sink>>>
     where
         T: PubSubMetadata,
         S: Middleware<T>,
@@ -91,25 +111,6 @@ fn add_subscriptions<T, S, B>(
         }),
     );
 
-    std::thread::spawn(move || {
-        futures::executor::block_on(async move {
-            const CHANNEL_BUFFER_SIZE: usize = 1024;
-
-            let (sink, mut stream) = channel(CHANNEL_BUFFER_SIZE);
-            slot_notification_sinks.lock().push(sink);
-
-            while let Some((slot_number, epoch)) = stream.next().await {
-                if let ViableEpochDescriptor::Signaled(identifier, _header) = epoch {
-                    let params = Params::Array(vec![serde_json::to_value(SlotInfo {
-                        slot_number,
-                        epoch_randomness: identifier.hash.encode(),
-                    }).unwrap()]);
-                    for sink in sinks.lock().values() {
-                        let _ = sink.notify(params.clone());
-                    }
-                }
-            }
-        });
-    });
+    sinks
 }
 

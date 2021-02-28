@@ -125,7 +125,7 @@ use sp_blockchain::{
 use schnorrkel::SignatureError;
 use codec::{Encode, Decode};
 use sp_api::ApiExt;
-use crate::rpc::RpcServer;
+use crate::rpc_server::RpcServer;
 
 mod verification;
 mod migration;
@@ -134,7 +134,7 @@ pub mod aux_schema;
 pub mod authorship;
 #[cfg(test)]
 mod tests;
-mod rpc;
+mod rpc_server;
 
 /// BABE epoch information
 #[derive(Decode, Encode, PartialEq, Eq, Clone, Debug)]
