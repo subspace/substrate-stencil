@@ -18,7 +18,7 @@
 //! Private implementation details of BABE digests.
 
 use super::{
-	AuthorityId, AuthorityIndex, AuthoritySignature, BabeAuthorityWeight,
+	AuthorityId, AuthoritySignature, BabeAuthorityWeight,
 	BabeEpochConfiguration, SlotNumber, BABE_ENGINE_ID,
 };
 use codec::{Codec, Decode, Encode};
@@ -40,31 +40,32 @@ pub struct PrimaryPreDigest {
 	pub vrf_proof: VRFProof,
 }
 
+// TODO: De-duplicate
+#[derive(Clone, RuntimeDebug, Encode, Decode)]
+pub struct Solution {
+	pub public_key: AuthorityId,
+	pub nonce: u32,
+	pub encoding: Vec<u8>,
+	pub signature: [u8; 32],
+	pub tag: [u8; 32],
+	pub randomness: Vec<u8>,
+}
+
+/// Raw BABE primary slot assignment pre-digest.
+#[derive(Clone, RuntimeDebug, Encode, Decode)]
+pub struct SpartanPreDigest {
+	/// Slot number
+	pub slot_number: SlotNumber,
+	/// Solution (includes proof-of-space)
+	pub solution: Solution,
+}
+
 /// BABE secondary slot assignment pre-digest.
 #[derive(Clone, RuntimeDebug, Encode, Decode)]
 pub struct SecondaryPlainPreDigest {
-	/// Authority index
-	///
-	/// This is not strictly-speaking necessary, since the secondary slots
-	/// are assigned based on slot number and epoch randomness. But including
-	/// it makes things easier for higher-level users of the chain data to
-	/// be aware of the author of a secondary-slot block.
-	pub authority_index: super::AuthorityIndex,
+	pub public_key: AuthorityId,
 	/// Slot number
 	pub slot_number: SlotNumber,
-}
-
-/// BABE secondary deterministic slot assignment with VRF outputs.
-#[derive(Clone, RuntimeDebug, Encode, Decode)]
-pub struct SecondaryVRFPreDigest {
-	/// Authority index
-	pub authority_index: super::AuthorityIndex,
-	/// Slot number
-	pub slot_number: SlotNumber,
-	/// VRF output
-	pub vrf_output: VRFOutput,
-	/// VRF proof
-	pub vrf_proof: VRFProof,
 }
 
 /// A BABE pre-runtime digest. This contains all data required to validate a
@@ -74,18 +75,17 @@ pub struct SecondaryVRFPreDigest {
 pub enum PreDigest {
 	/// A primary VRF-based slot assignment.
 	#[codec(index = "1")]
-	Primary(PrimaryPreDigest),
+	Primary(SpartanPreDigest),
 	/// A secondary deterministic slot assignment.
 	#[codec(index = "2")]
 	SecondaryPlain(SecondaryPlainPreDigest),
 }
 
 impl PreDigest {
-	/// Returns the slot number of the pre digest.
-	pub fn authority_index(&self) -> AuthorityIndex {
+	pub fn public_key(&self) -> &AuthorityId {
 		match self {
-			PreDigest::Primary(primary) => primary.authority_index,
-			PreDigest::SecondaryPlain(secondary) => secondary.authority_index,
+			PreDigest::Primary(primary) => &primary.solution.public_key,
+			PreDigest::SecondaryPlain(secondary) => &secondary.public_key,
 		}
 	}
 

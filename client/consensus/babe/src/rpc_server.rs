@@ -15,6 +15,7 @@ use futures::future::Either;
 
 const SOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
 
+// TODO: De-duplicate
 #[derive(Debug, Deserialize)]
 pub struct Solution {
     pub public_key: [u8; 32],
@@ -22,6 +23,7 @@ pub struct Solution {
     pub encoding: Vec<u8>,
     pub signature: [u8; 32],
     pub tag: [u8; 32],
+    pub randomness: Vec<u8>,
 }
 
 #[derive(Debug, Deserialize)]

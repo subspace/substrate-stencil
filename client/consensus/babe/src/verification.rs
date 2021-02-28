@@ -18,10 +18,7 @@
 use sp_runtime::{traits::Header, traits::DigestItemFor};
 use sp_core::{Pair, Public};
 use sp_consensus_babe::{make_transcript, AuthoritySignature, SlotNumber, AuthorityPair, AuthorityId};
-use sp_consensus_babe::digests::{
-	PreDigest, PrimaryPreDigest,
-	CompatibleDigestItem
-};
+use sp_consensus_babe::digests::{PreDigest, PrimaryPreDigest, CompatibleDigestItem, SpartanPreDigest};
 use sc_consensus_slots::CheckedHeader;
 use log::{debug, trace};
 use super::{find_pre_digest, babe_err, Epoch, BlockT, Error};
@@ -86,10 +83,7 @@ pub(super) fn check_header<B: BlockT + Sized>(
 		return Ok(CheckedHeader::Deferred(header, pre_digest.slot_number()));
 	}
 
-	let author = match authorities.get(pre_digest.authority_index() as usize) {
-		Some(author) => author.0.clone(),
-		None => return Err(babe_err(Error::SlotAuthorNotFound)),
-	};
+	let author = pre_digest.public_key().clone();
 
 	match &pre_digest {
 		PreDigest::Primary(primary) => {
@@ -98,7 +92,6 @@ pub(super) fn check_header<B: BlockT + Sized>(
 			check_primary_header::<B>(
 				pre_hash,
 				primary,
-				sig,
 				&epoch,
 				epoch.config.c,
 			)?;
@@ -128,40 +121,10 @@ pub(super) struct VerifiedHeaderInfo<B: BlockT> {
 /// its parent since it is a primary block.
 fn check_primary_header<B: BlockT + Sized>(
 	pre_hash: B::Hash,
-	pre_digest: &PrimaryPreDigest,
-	signature: AuthoritySignature,
+	pre_digest: &SpartanPreDigest,
 	epoch: &Epoch,
 	c: (u64, u64),
 ) -> Result<(), Error<B>> {
-	let author = &epoch.authorities[pre_digest.authority_index as usize].0;
-
-	if AuthorityPair::verify(&signature, pre_hash, &author) {
-		let (inout, _) = {
-			let transcript = make_transcript(
-				&epoch.randomness,
-				pre_digest.slot_number,
-				epoch.epoch_index,
-			);
-
-			schnorrkel::PublicKey::from_bytes(author.as_slice()).and_then(|p| {
-				p.vrf_verify(transcript, &pre_digest.vrf_output, &pre_digest.vrf_proof)
-			}).map_err(|s| {
-				babe_err(Error::VRFVerificationFailed(s))
-			})?
-		};
-
-		let threshold = calculate_primary_threshold(
-			c,
-			&epoch.authorities,
-			pre_digest.authority_index as usize,
-		);
-
-		if !check_primary_threshold(&inout, threshold) {
-			return Err(babe_err(Error::VRFVerificationOfBlockFailed(author.clone(), threshold)));
-		}
-
-		Ok(())
-	} else {
-		Err(babe_err(Error::BadSignature(pre_hash)))
-	}
+	// TODO: Actually verify
+	Ok(())
 }

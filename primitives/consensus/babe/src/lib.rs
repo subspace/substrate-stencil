@@ -17,7 +17,9 @@
 
 //! Primitives for BABE.
 #![deny(warnings)]
-#![forbid(unsafe_code, missing_docs, unused_variables, unused_imports)]
+// TODO: Restore
+// #![forbid(unsafe_code, missing_docs, unused_variables, unused_imports)]
+#![forbid(unsafe_code, unused_variables, unused_imports)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod digests;
@@ -271,8 +273,20 @@ where
 		}
 
 		// both headers must have been authored by the same authority
-		if first_pre_digest.authority_index() != second_pre_digest.authority_index() {
-			return None;
+		match (first_pre_digest, second_pre_digest) {
+			(PreDigest::Primary(first_pre_digest), PreDigest::Primary(second_pre_digest)) => {
+				if first_pre_digest.solution.tag != second_pre_digest.solution.tag {
+					return None;
+				}
+			}
+			(PreDigest::SecondaryPlain(first_pre_digest), PreDigest::SecondaryPlain(second_pre_digest)) => {
+				if first_pre_digest.public_key != second_pre_digest.public_key {
+					return None;
+				}
+			}
+			_ => {
+				return None;
+			}
 		}
 
 		// we finally verify that the expected authority has signed both headers and

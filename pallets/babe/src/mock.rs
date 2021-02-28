@@ -37,6 +37,7 @@ use sp_consensus_babe::{AuthorityId, AuthorityPair, SlotNumber};
 use sp_consensus_vrf::schnorrkel::{VRFOutput, VRFProof};
 use sp_staking::SessionIndex;
 use pallet_staking::EraIndex;
+use sp_consensus_babe::digests::Solution;
 
 impl_outer_origin!{
 	pub enum Origin for Test where system = frame_system {}
@@ -129,12 +130,12 @@ parameter_types! {
 	pub const UncleGenerations: u64 = 0;
 }
 
-impl pallet_authorship::Trait for Test {
-	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Babe>;
-	type UncleGenerations = UncleGenerations;
-	type FilterUncle = ();
-	type EventHandler = ();
-}
+// impl pallet_authorship::Trait for Test {
+// 	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Babe>;
+// 	type UncleGenerations = UncleGenerations;
+// 	type FilterUncle = ();
+// 	type EventHandler = ();
+// }
 
 parameter_types! {
 	pub const MinimumPeriod: u64 = 1;
@@ -318,11 +319,16 @@ pub fn make_pre_digest(
 	vrf_proof: VRFProof,
 ) -> Digest {
 	let digest_data = sp_consensus_babe::digests::PreDigest::Primary(
-		sp_consensus_babe::digests::PrimaryPreDigest {
-			authority_index,
+		sp_consensus_babe::digests::SpartanPreDigest {
 			slot_number,
-			vrf_output,
-			vrf_proof,
+			solution: Solution {
+				public_key: [0u8; 32],
+				nonce: 0,
+				encoding: vec![0u8; 4096],
+				signature: [0u8; 32],
+				tag: [0u8; 32],
+				randomness: vec![0u8; 32]
+			}
 		}
 	);
 	let log = DigestItem::PreRuntime(sp_consensus_babe::BABE_ENGINE_ID, digest_data.encode());

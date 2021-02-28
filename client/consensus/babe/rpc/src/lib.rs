@@ -58,11 +58,6 @@ pub struct SlotInfo {
 pub trait BabeApi {
 	/// RPC metadata
 	type Metadata;
-
-	/// Returns data about which slots (primary or secondary) can be claimed in the current epoch
-	/// with the keys in the keystore.
-	#[rpc(name = "babe_epochAuthorship")]
-	fn epoch_authorship(&self) -> FutureResult<HashMap<AuthorityId, EpochAuthorship>>;
 }
 
 /// Implements the BabeRpc trait for interacting with Babe.
@@ -110,71 +105,6 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 		SC: SelectChain<B> + Clone + 'static,
 {
 	type Metadata = sc_rpc_api::Metadata;
-
-	fn epoch_authorship(&self) -> FutureResult<HashMap<AuthorityId, EpochAuthorship>> {
-		if let Err(err) = self.deny_unsafe.check_if_safe() {
-			return Box::new(rpc_future::err(err.into()));
-		}
-
-		let (
-			babe_config,
-			keystore,
-			shared_epoch,
-			client,
-			select_chain,
-		) = (
-			self.babe_config.clone(),
-			self.keystore.clone(),
-			self.shared_epoch_changes.clone(),
-			self.client.clone(),
-			self.select_chain.clone(),
-		);
-		let future = async move {
-			let header = select_chain.best_chain().map_err(Error::Consensus)?;
-			let epoch_start = client.runtime_api()
-				.current_epoch_start(&BlockId::Hash(header.hash()))
-				.map_err(|err| {
-					Error::StringError(format!("{:?}", err))
-				})?;
-			let epoch = epoch_data(&shared_epoch, &client, &babe_config, epoch_start, &select_chain)?;
-			let (epoch_start, epoch_end) = (epoch.start_slot(), epoch.end_slot());
-
-			let mut claims: HashMap<AuthorityId, EpochAuthorship> = HashMap::new();
-
-			let keys = {
-				let ks = keystore.read();
-				epoch.authorities.iter()
-					.enumerate()
-					.filter_map(|(i, a)| {
-						if ks.has_keys(&[(a.0.to_raw_vec(), AuthorityId::ID)]) {
-							Some((a.0.clone(), i))
-						} else {
-							None
-						}
-					})
-					.collect::<Vec<_>>()
-			};
-
-			for slot_number in epoch_start..epoch_end {
-				if let Some((claim, key)) =
-					authorship::claim_slot_using_keys(slot_number, &epoch, &keystore, &keys)
-				{
-					match claim {
-						PreDigest::Primary { .. } => {
-							claims.entry(key).or_default().primary.push(slot_number);
-						}
-						PreDigest::SecondaryPlain { .. } => {
-							claims.entry(key).or_default().secondary.push(slot_number);
-						}
-					};
-				}
-			}
-
-			Ok(claims)
-		}.boxed();
-
-		Box::new(future.compat())
-	}
 }
 
 /// Holds information about the `slot_number`'s that can be claimed by a given key.
@@ -285,32 +215,5 @@ mod tests {
 			longest_chain,
 			deny_unsafe,
 		)
-	}
-
-	#[test]
-	fn epoch_authorship_works() {
-		let handler = test_babe_rpc_handler(DenyUnsafe::No);
-		let mut io = IoHandler::new();
-
-		io.extend_with(BabeApi::to_delegate(handler));
-		let request = r#"{"jsonrpc":"2.0","method":"babe_epochAuthorship","params": [],"id":1}"#;
-		let response = r#"{"jsonrpc":"2.0","result":{"5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY":{"primary":[0],"secondary":[1,2,4],"secondary_vrf":[]}},"id":1}"#;
-
-		assert_eq!(Some(response.into()), io.handle_request_sync(request));
-	}
-
-	#[test]
-	fn epoch_authorship_is_unsafe() {
-		let handler = test_babe_rpc_handler(DenyUnsafe::Yes);
-		let mut io = IoHandler::new();
-
-		io.extend_with(BabeApi::to_delegate(handler));
-		let request = r#"{"jsonrpc":"2.0","method":"babe_epochAuthorship","params": [],"id":1}"#;
-
-		let response = io.handle_request_sync(request).unwrap();
-		let mut response: serde_json::Value = serde_json::from_str(&response).unwrap();
-		let error: RpcError = serde_json::from_value(response["error"].take()).unwrap();
-
-		assert_eq!(error, RpcError::method_not_found())
 	}
 }

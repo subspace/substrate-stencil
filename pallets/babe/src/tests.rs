@@ -127,15 +127,6 @@ fn first_block_epoch_zero_start() {
 }
 
 #[test]
-fn authority_index() {
-	new_test_ext(4).execute_with(|| {
-		assert_eq!(
-			Babe::find_author((&[(BABE_ENGINE_ID, &[][..])]).into_iter().cloned()), None,
-			"Trivially invalid authorities are ignored")
-	})
-}
-
-#[test]
 fn can_predict_next_epoch_change() {
 	new_test_ext(1).execute_with(|| {
 		assert_eq!(<Test as Trait>::EpochDuration::get(), 3);

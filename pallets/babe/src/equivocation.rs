@@ -103,11 +103,11 @@ impl<T: Trait> HandleEquivocation<T> for () {
 /// using existing subsystems that are part of frame (type bounds described
 /// below) and will dispatch to them directly, it's only purpose is to wire all
 /// subsystems together.
-pub struct EquivocationHandler<I, R> {
-	_phantom: sp_std::marker::PhantomData<(I, R)>,
+pub struct EquivocationHandler<I> {
+	_phantom: sp_std::marker::PhantomData<I>,
 }
 
-impl<I, R> Default for EquivocationHandler<I, R> {
+impl<I> Default for EquivocationHandler<I> {
 	fn default() -> Self {
 		Self {
 			_phantom: Default::default(),
@@ -115,29 +115,24 @@ impl<I, R> Default for EquivocationHandler<I, R> {
 	}
 }
 
-impl<T, R> HandleEquivocation<T> for EquivocationHandler<T::KeyOwnerIdentification, R>
+impl<T> HandleEquivocation<T> for EquivocationHandler<T::KeyOwnerIdentification>
 where
 	// We use the authorship pallet to fetch the current block author and use
 	// `offchain::SendTransactionTypes` for unsigned extrinsic creation and
 	// submission.
-	T: Trait + pallet_authorship::Trait + frame_system::offchain::SendTransactionTypes<Call<T>>,
-	// A system for reporting offences after valid equivocation reports are
-	// processed.
-	R: ReportOffence<
-		T::AccountId,
-		T::KeyOwnerIdentification,
-		BabeEquivocationOffence<T::KeyOwnerIdentification>,
-	>,
+	T: Trait + frame_system::offchain::SendTransactionTypes<Call<T>>,
 {
 	fn report_offence(
 		reporters: Vec<T::AccountId>,
 		offence: BabeEquivocationOffence<T::KeyOwnerIdentification>,
 	) -> Result<(), OffenceError> {
-		R::report_offence(reporters, offence)
+		// TODO
+		Ok(())
 	}
 
 	fn is_known_offence(offenders: &[T::KeyOwnerIdentification], time_slot: &SlotNumber) -> bool {
-		R::is_known_offence(offenders, time_slot)
+		// TODO
+		false
 	}
 
 	fn submit_unsigned_equivocation_report(
@@ -157,7 +152,8 @@ where
 	}
 
 	fn block_author() -> Option<T::AccountId> {
-		Some(<pallet_authorship::Module<T>>::author())
+		// TODO
+		None
 	}
 }
 

@@ -331,20 +331,20 @@ impl<T: Trait> RandomnessT<<T as frame_system::Trait>::Hash> for Module<T> {
 /// A BABE public key
 pub type BabeKey = [u8; PUBLIC_KEY_LENGTH];
 
-impl<T: Trait> FindAuthor<u32> for Module<T> {
-	fn find_author<'a, I>(digests: I) -> Option<u32> where
-		I: 'a + IntoIterator<Item=(ConsensusEngineId, &'a [u8])>
-	{
-		for (id, mut data) in digests.into_iter() {
-			if id == BABE_ENGINE_ID {
-				let pre_digest: PreDigest = PreDigest::decode(&mut data).ok()?;
-				return Some(pre_digest.authority_index())
-			}
-		}
-
-		return None;
-	}
-}
+// impl<T: Trait> FindAuthor<AuthorityId> for Module<T> {
+// 	fn find_author<'a, I>(digests: I) -> Option<AuthorityId> where
+// 		I: 'a + IntoIterator<Item=(ConsensusEngineId, &'a [u8])>
+// 	{
+// 		for (id, mut data) in digests.into_iter() {
+// 			if id == BABE_ENGINE_ID {
+// 				let pre_digest: PreDigest = PreDigest::decode(&mut data).ok()?;
+// 				return Some(pre_digest.public_key().clone())
+// 			}
+// 		}
+//
+// 		return None;
+// 	}
+// }
 
 impl<T: Trait> IsMember<AuthorityId> for Module<T> {
 	fn is_member(authority_id: &AuthorityId) -> bool {
@@ -547,31 +547,7 @@ impl<T: Trait> Module<T> {
 			CurrentSlot::put(current_slot);
 
 			if let PreDigest::Primary(primary) = digest {
-				// place the VRF output into the `Initialized` storage item
-				// and it'll be put onto the under-construction randomness
-				// later, once we've decided which epoch this block is in.
-				//
-				// Reconstruct the bytes of VRFInOut using the authority id.
-				Authorities::get()
-					.get(primary.authority_index as usize)
-					.and_then(|author| {
-						schnorrkel::PublicKey::from_bytes(author.0.as_slice()).ok()
-					})
-					.and_then(|pubkey| {
-						let transcript = sp_consensus_babe::make_transcript(
-							&Self::randomness(),
-							current_slot,
-							EpochIndex::get(),
-						);
-
-						primary.vrf_output.0.attach_input_hash(
-							&pubkey,
-							transcript
-						).ok()
-					})
-					.map(|inout| {
-						inout.make_bytes(&sp_consensus_babe::BABE_VRF_INOUT_CONTEXT)
-					})
+				Some(primary.solution.tag)
 			} else {
 				None
 			}

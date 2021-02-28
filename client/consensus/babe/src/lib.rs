@@ -543,17 +543,17 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 		let s = self.rpc_server.notify_new_slot(slot_number, epoch.as_ref());
 		// TODO: Use ^ instead
 
-		let s = authorship::claim_slot(
-			slot_number,
-			epoch.as_ref(),
-			&self.keystore,
-		);
+		// let s = authorship::claim_slot(
+		// 	slot_number,
+		// 	epoch.as_ref(),
+		// 	&self.keystore,
+		// );
 
 		if s.is_some() {
 			debug!(target: "babe", "Claimed slot {}", slot_number);
 		}
 
-		s
+		None
 	}
 
 	fn notify_slot(
@@ -703,8 +703,9 @@ fn find_pre_digest<B: BlockT>(header: &B::Header) -> Result<PreDigest, Error<B>>
 	// dummy one to not break any invariants in the rest of the code
 	if header.number().is_zero() {
 		return Ok(PreDigest::SecondaryPlain(SecondaryPlainPreDigest {
+			// TODO: Make part of genesis config
+			public_key: AuthorityId::from_slice(&[0u8; 32]),
 			slot_number: 0,
-			authority_index: 0,
 		}));
 	}
 

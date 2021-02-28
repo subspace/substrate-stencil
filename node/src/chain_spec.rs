@@ -3,7 +3,7 @@ use node_template_runtime::{
 	AccountId, BabeConfig, BalancesConfig, GenesisConfig,
 	SudoConfig, SystemConfig, WASM_BINARY, Signature, StakerStatus,
 	SessionConfig, StakingConfig, opaque::SessionKeys, Balance,
-	currency::DOLLARS, ImOnlineConfig, DemocracyConfig, ElectionsConfig,
+	currency::DOLLARS, DemocracyConfig, ElectionsConfig,
 	TechnicalCommitteeConfig, CouncilConfig,
 };
 use sp_consensus_babe::AuthorityId as BabeId;
@@ -240,7 +240,7 @@ fn public_testnet_genesis(wasm_binary: &[u8]) -> GenesisConfig {
 				(
 					x.0.clone(),
 					x.0.clone(),
-					session_keys(x.2.clone(), x.3.clone())
+					session_keys(x.2.clone())
 				)
 			}).collect::<Vec<_>>(),
 		}),
@@ -255,9 +255,6 @@ fn public_testnet_genesis(wasm_binary: &[u8]) -> GenesisConfig {
 			force_era: Forcing::ForceNone,
 			slash_reward_fraction: Perbill::from_percent(10),
 			.. Default::default()
-		}),
-		pallet_im_online: Some(ImOnlineConfig {
-			keys: vec![],
 		}),
 		pallet_democracy: Some(DemocracyConfig::default()),
 		pallet_elections_phragmen: Some(ElectionsConfig {
@@ -282,11 +279,9 @@ fn public_testnet_genesis(wasm_binary: &[u8]) -> GenesisConfig {
 
 fn session_keys(
 	babe: BabeId,
-	im_online: ImOnlineId
 ) -> SessionKeys {
 	SessionKeys {
 		babe,
-		im_online
 	}
 }
 
@@ -324,7 +319,6 @@ fn testnet_genesis(
 			keys: initial_authorities.iter().map(|x| {
 				(x.0.clone(), x.0.clone(), session_keys(
 					x.2.clone(),
-					x.3.clone(),
 				))
 			}).collect::<Vec<_>>(),
 		}),
@@ -337,9 +331,6 @@ fn testnet_genesis(
 			invulnerables: initial_authorities.iter().map(|x| x.0.clone()).collect(),
 			slash_reward_fraction: Perbill::from_percent(10),
 			.. Default::default()
-		}),
-		pallet_im_online: Some(ImOnlineConfig {
-			keys: vec![],
 		}),
 		pallet_treasury: Some(Default::default()),
 		pallet_collective_Instance1: Some(CouncilConfig::default()),

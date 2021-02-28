@@ -127,7 +127,7 @@ pub mod opaque {
 	impl_opaque_keys! {
 		pub struct SessionKeys {
 			pub babe: Babe,
-			pub im_online: ImOnline,
+			// pub im_online: ImOnline,
 		}
 	}
 }
@@ -198,30 +198,30 @@ impl Filter<Call> for BaseFilter {
 	}
 }
 
-pub struct Author;
-impl OnUnbalanced<NegativeImbalance> for Author {
-	fn on_nonzero_unbalanced(amount: NegativeImbalance) {
-		Balances::resolve_creating(&Authorship::author(), amount);
-	}
-}
-
-type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
-
-pub struct DealWithFees;
-impl OnUnbalanced<NegativeImbalance> for DealWithFees {
-	fn on_unbalanceds<B>(mut fees_then_tips: impl Iterator<Item=NegativeImbalance>) {
-		if let Some(fees) = fees_then_tips.next() {
-			// for fees, 80% to treasury, 20% to author
-			let mut split = fees.ration(80, 20);
-			if let Some(tips) = fees_then_tips.next() {
-				// for tips, if any, 80% to treasury, 20% to author (though this can be anything)
-				tips.ration_merge_into(80, 20, &mut split);
-			}
-			Treasury::on_unbalanced(split.0);
-			Author::on_unbalanced(split.1);
-		}
-	}
-}
+// pub struct Author;
+// impl OnUnbalanced<NegativeImbalance> for Author {
+// 	fn on_nonzero_unbalanced(amount: NegativeImbalance) {
+// 		Balances::resolve_creating(&Authorship::author(), amount);
+// 	}
+// }
+//
+// type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
+//
+// pub struct DealWithFees;
+// impl OnUnbalanced<NegativeImbalance> for DealWithFees {
+// 	fn on_unbalanceds<B>(mut fees_then_tips: impl Iterator<Item=NegativeImbalance>) {
+// 		if let Some(fees) = fees_then_tips.next() {
+// 			// for fees, 80% to treasury, 20% to author
+// 			let mut split = fees.ration(80, 20);
+// 			if let Some(tips) = fees_then_tips.next() {
+// 				// for tips, if any, 80% to treasury, 20% to author (though this can be anything)
+// 				tips.ration_merge_into(80, 20, &mut split);
+// 			}
+// 			Treasury::on_unbalanced(split.0);
+// 			Author::on_unbalanced(split.1);
+// 		}
+// 	}
+// }
 
 parameter_types! {
 	pub const BlockHashCount: BlockNumber = 2400;
@@ -320,7 +320,7 @@ impl pallet_babe::Trait for Runtime {
 	)>>::IdentificationTuple;
 
 	type HandleEquivocation =
-		pallet_babe::EquivocationHandler<Self::KeyOwnerIdentification, Offences>;
+		pallet_babe::EquivocationHandler<Self::KeyOwnerIdentification>;
 
 	type WeightInfo = ();
 }
@@ -457,12 +457,12 @@ parameter_types! {
 	pub const UncleGenerations: BlockNumber = 5;
 }
 
-impl pallet_authorship::Trait for Runtime {
-	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Babe>;
-	type UncleGenerations = UncleGenerations;
-	type FilterUncle = ();
-	type EventHandler = (Staking, ImOnline);
-}
+// impl pallet_authorship::Trait for Runtime {
+// 	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Babe>;
+// 	type UncleGenerations = UncleGenerations;
+// 	type FilterUncle = ();
+// 	type EventHandler = (Staking, ImOnline);
+// }
 
 impl pallet_utility::Trait for Runtime {
 	type Event = Event;
@@ -474,26 +474,26 @@ parameter_types! {
 	pub OffencesWeightSoftLimit: Weight = Perbill::from_percent(60) * MaximumBlockWeight::get();
 }
 
-impl pallet_offences::Trait for Runtime {
-	type Event = Event;
-	type IdentificationTuple = pallet_session::historical::IdentificationTuple<Self>;
-	type OnOffenceHandler = Staking;
-	type WeightSoftLimit = OffencesWeightSoftLimit;
-}
+// impl pallet_offences::Trait for Runtime {
+// 	type Event = Event;
+// 	type IdentificationTuple = pallet_session::historical::IdentificationTuple<Self>;
+// 	type OnOffenceHandler = Staking;
+// 	type WeightSoftLimit = OffencesWeightSoftLimit;
+// }
 
 parameter_types! {
 	pub const SessionDuration: BlockNumber = EPOCH_DURATION_IN_SLOTS as _;
 	pub const ImOnlineUnsignedPriority: TransactionPriority = TransactionPriority::max_value();
 }
 
-impl pallet_im_online::Trait for Runtime {
-	type AuthorityId = ImOnlineId;
-	type Event = Event;
-	type SessionDuration = SessionDuration;
-	type ReportUnresponsiveness = Offences;
-	type UnsignedPriority = ImOnlineUnsignedPriority;
-	type WeightInfo = ();
-}
+// impl pallet_im_online::Trait for Runtime {
+// 	type AuthorityId = ImOnlineId;
+// 	type Event = Event;
+// 	type SessionDuration = SessionDuration;
+// 	type ReportUnresponsiveness = Offences;
+// 	type UnsignedPriority = ImOnlineUnsignedPriority;
+// 	type WeightInfo = ();
+// }
 
 parameter_types! {
 	pub const ProposalBond: Permill = Permill::from_percent(5);
@@ -712,16 +712,16 @@ construct_runtime!(
 		RandomnessCollectiveFlip: pallet_randomness_collective_flip::{Module, Call, Storage},
 		Timestamp: pallet_timestamp::{Module, Call, Storage, Inherent},
 		Babe: pallet_babe::{Module, Call, Storage, Config, Inherent},
-		ImOnline: pallet_im_online::{Module, Call, Storage, Event<T>, ValidateUnsigned, Config<T>},
+		// ImOnline: pallet_im_online::{Module, Call, Storage, Event<T>, ValidateUnsigned, Config<T>},
 		Balances: pallet_balances::{Module, Call, Storage, Config<T>, Event<T>},
 		TransactionPayment: pallet_transaction_payment::{Module, Storage},
 		Staking: pallet_staking::{Module, Call, Config<T>, Storage, Event<T>, ValidateUnsigned},
-		Authorship: pallet_authorship::{Module, Call, Storage, Inherent},
+		// Authorship: pallet_authorship::{Module, Call, Storage, Inherent},
 		Session: pallet_session::{Module, Call, Storage, Event, Config<T>},
 		Historical: pallet_session_historical::{Module},
 		Sudo: pallet_sudo::{Module, Call, Config<T>, Storage, Event<T>},
 		Utility: pallet_utility::{Module, Call, Event},
-		Offences: pallet_offences::{Module, Call, Storage, Event},
+		// Offences: pallet_offences::{Module, Call, Storage, Event},
 		Treasury: pallet_treasury::{Module, Call, Storage, Config, Event<T>},
 		Council: pallet_collective::<Instance1>::{Module, Call, Storage, Origin<T>, Event<T>, Config<T>},
 		Elections: pallet_elections_phragmen::{Module, Call, Storage, Event<T>, Config<T>},
