@@ -5,59 +5,29 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use futures::{future, StreamExt};
+use futures::future;
 use log::debug;
-use futures::channel::mpsc::{Sender, channel};
-use sc_consensus_epochs::ViableEpochDescriptor;
-use sp_api::NumberFor;
-use crate::Epoch;
-use sp_runtime::traits::Block as BlockT;
+use crate::{Epoch, SlotNumber};
 use serde::{Serialize, Deserialize};
-use codec::Encode;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SlotInfo {
-    pub slot_number: u64,
+    pub slot_number: SlotNumber,
     pub epoch_randomness: Vec<u8>,
 }
 
 pub struct RpcServer {
     server: Server,
+    slot_info_sinks: Arc<Mutex<HashMap<SubscriptionId, Sink>>>,
 }
 
 impl RpcServer {
-    pub fn new<B>(
-        slot_notification_sinks: Arc<Mutex<Vec<Sender<(u64, ViableEpochDescriptor<B::Hash, NumberFor<B>, Epoch>)>>>>,
-    ) -> jsonrpc_ws_server::Result<Self>
-        where
-            B: BlockT,
-    {
+    pub fn new() -> jsonrpc_ws_server::Result<Self> {
         let mut io = PubSubHandler::new(MetaIoHandler::default());
         io.add_sync_method("babe_proposeProofOfSpace", move |_params: Params| {
             Ok(Value::String("TODO".to_string()))
         });
-        let slot_info_sinks = add_slot_info_subscriptions::<_, _, B>(&mut io);
-
-        std::thread::spawn(move || {
-            futures::executor::block_on(async move {
-                const CHANNEL_BUFFER_SIZE: usize = 1024;
-
-                let (sink, mut stream) = channel(CHANNEL_BUFFER_SIZE);
-                slot_notification_sinks.lock().push(sink);
-
-                while let Some((slot_number, epoch)) = stream.next().await {
-                    if let ViableEpochDescriptor::Signaled(identifier, _header) = epoch {
-                        let params = Params::Array(vec![serde_json::to_value(SlotInfo {
-                            slot_number,
-                            epoch_randomness: identifier.hash.encode(),
-                        }).unwrap()]);
-                        for sink in slot_info_sinks.lock().values() {
-                            let _ = sink.notify(params.clone());
-                        }
-                    }
-                }
-            });
-        });
+        let slot_info_sinks = add_slot_info_subscriptions::<_, _>(&mut io);
 
         ServerBuilder::new(io)
             .session_meta_extractor(|context: &RequestContext| {
@@ -65,18 +35,27 @@ impl RpcServer {
             })
             .start(&"127.0.0.1:9945".parse().unwrap())
             .map(|server| {
-                Self { server }
+                Self { server, slot_info_sinks }
             })
+    }
+
+    pub fn notify_new_slot(&self, slot_number: SlotNumber, epoch: &Epoch) {
+        let params = Params::Array(vec![serde_json::to_value(SlotInfo {
+            slot_number,
+            epoch_randomness: epoch.randomness.to_vec(),
+        }).unwrap()]);
+        for sink in self.slot_info_sinks.lock().values() {
+            let _ = sink.notify(params.clone());
+        }
     }
 }
 
-fn add_slot_info_subscriptions<T, S, B>(
+fn add_slot_info_subscriptions<T, S>(
     io: &mut PubSubHandler<T, S>,
 ) -> Arc<Mutex<HashMap<SubscriptionId, Sink>>>
     where
         T: PubSubMetadata,
         S: Middleware<T>,
-        B: BlockT,
 {
     let next_subscription_id = Arc::new(AtomicUsize::new(1));
     let sinks = Arc::<Mutex<HashMap<SubscriptionId, Sink>>>::default();

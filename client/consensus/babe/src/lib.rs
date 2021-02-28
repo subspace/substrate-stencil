@@ -394,7 +394,7 @@ pub fn start_babe<B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	let config = babe_link.config;
 	let slot_notification_sinks = Arc::new(Mutex::new(Vec::new()));
 
-	let rpc_server = RpcServer::new::<B>(slot_notification_sinks.clone())
+	let rpc_server = RpcServer::new()
 		.expect("Failed to start RPC server");
 
 	let worker = BabeSlotWorker {
@@ -539,12 +539,15 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 		epoch_descriptor: &ViableEpochDescriptor<B::Hash, NumberFor<B>, Epoch>,
 	) -> Option<Self::Claim> {
 		debug!(target: "babe", "Attempting to claim slot {}", slot_number);
+		let epoch_changes = self.epoch_changes.lock();
+		let epoch = epoch_changes.viable_epoch(
+			&epoch_descriptor,
+			|slot| Epoch::genesis(&self.config, slot)
+		)?;
+		self.rpc_server.notify_new_slot(slot_number, epoch.as_ref());
 		let s = authorship::claim_slot(
 			slot_number,
-			self.epoch_changes.lock().viable_epoch(
-				&epoch_descriptor,
-				|slot| Epoch::genesis(&self.config, slot)
-			)?.as_ref(),
+			epoch.as_ref(),
 			&self.keystore,
 		);
 
