@@ -82,12 +82,18 @@ impl RpcServer {
             epoch_randomness: epoch.randomness.to_vec(),
         }).unwrap()]);
 
+        let slot_info_sinks = self.slot_info_sinks.lock();
+        if slot_info_sinks.is_empty() {
+            return None;
+        }
+
         let (sender, receiver) = oneshot::channel();
         self.proof_requests.lock().insert(slot_number, sender);
 
-        for sink in self.slot_info_sinks.lock().values() {
+        for sink in slot_info_sinks.values() {
             let _ = sink.notify(params.clone());
         }
+        drop(slot_info_sinks);
 
         // Spawning separate thread because recursive `futures::executor::block_on` calls will panic
         let solution = std::thread::spawn(move || {
