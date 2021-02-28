@@ -128,7 +128,6 @@ impl RpcServer {
 
         self.proof_requests.lock().remove(&slot_number);
 
-        // TODO: Receive from RPC ^
         None
     }
 }
