@@ -5,22 +5,31 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use futures::{future, FutureExt};
+use futures::{future, FutureExt, StreamExt, SinkExt};
 use log::{debug, warn};
 use crate::{Epoch, SlotNumber, PreDigest, AuthorityId};
 use serde::{Serialize, Deserialize};
-use futures::channel::oneshot;
+use futures::channel::mpsc;
 use std::time::Duration;
 use futures::future::Either;
 
 const SOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProposedProofOfSpace {
-    slot_number: SlotNumber,
+#[derive(Debug, Deserialize)]
+struct Solution {
+    public_key: [u8; 32],
+    nonce: u32,
+    encoding: Vec<u8>,
+    signature: [u8; 32],
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
+pub struct ProposedProofOfSpaceResult {
+    slot_number: SlotNumber,
+    solution: Option<Solution>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SlotInfo {
     pub slot_number: SlotNumber,
     pub epoch_randomness: Vec<u8>,
@@ -29,23 +38,23 @@ pub struct SlotInfo {
 pub struct RpcServer {
     _server: Server,
     slot_info_sinks: Arc<Mutex<HashMap<SubscriptionId, Box<dyn (Fn(Value) -> SinkResult) + Send>>>>,
-    proof_requests: Arc<Mutex<HashMap<SlotNumber, oneshot::Sender<()>>>>,
+    proof_requests: Arc<Mutex<HashMap<SlotNumber, mpsc::Sender<Option<Solution>>>>>,
 }
 
 impl RpcServer {
     pub fn new() -> jsonrpc_ws_server::Result<Self> {
         let mut io = PubSubHandler::new(MetaIoHandler::default());
 
-        let proof_requests = Arc::<Mutex<HashMap<SlotNumber, oneshot::Sender<()>>>>::default();
+        let proof_requests = Arc::<Mutex<HashMap<SlotNumber, mpsc::Sender<Option<Solution>>>>>::default();
 
         io.add_notification("babe_proposeProofOfSpace", {
             let proof_requests = Arc::clone(&proof_requests);
 
             move |params: Params| {
-                match params.parse::<(ProposedProofOfSpace,)>() {
+                match params.parse::<(ProposedProofOfSpaceResult,)>() {
                     Ok((proposed_proof,)) => {
-                        if let Some(sender) = proof_requests.lock().remove(&proposed_proof.slot_number) {
-                            let _ = sender.send(());
+                        if let Some(mut sender) = proof_requests.lock().remove(&proposed_proof.slot_number) {
+                            let _ = sender.send(proposed_proof.solution);
                         } else {
                             warn!("babe_proposeProofOfSpace ignored because there is no sender waiting");
                         }
@@ -79,11 +88,12 @@ impl RpcServer {
         }).unwrap();
 
         let slot_info_sinks = self.slot_info_sinks.lock();
-        if slot_info_sinks.is_empty() {
+        let subscribers_count = slot_info_sinks.len();
+        if subscribers_count == 0 {
             return None;
         }
 
-        let (sender, receiver) = oneshot::channel();
+        let (sender, mut receiver) = mpsc::channel(1);
         self.proof_requests.lock().insert(slot_number, sender);
 
         for sink in slot_info_sinks.values() {
@@ -95,9 +105,17 @@ impl RpcServer {
         let solution = std::thread::spawn(move || {
             futures::executor::block_on(async move {
                 let timeout = futures_timer::Delay::new(SOLUTION_TIMEOUT).map(|_| None);
-                let solution = receiver.map(|result| result.ok());
+                let solution = async move {
+                    while let Some(solution) = receiver.next().await {
+                        if let Some(solution) = solution {
+                            return Some(solution);
+                        }
+                    }
 
-                match future::select(timeout, solution).await {
+                    None
+                };
+
+                match future::select(timeout, Box::pin(solution)).await {
                     Either::Left((value1, _)) => value1,
                     Either::Right((value2, _)) => value2,
                 }
