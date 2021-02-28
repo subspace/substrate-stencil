@@ -5,10 +5,20 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use futures::future;
-use log::debug;
-use crate::{Epoch, SlotNumber};
+use futures::{future, FutureExt};
+use log::{debug, warn};
+use crate::{Epoch, SlotNumber, PreDigest, AuthorityId};
 use serde::{Serialize, Deserialize};
+use futures::channel::oneshot;
+use std::time::Duration;
+use futures::future::Either;
+
+const SOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProposedProofOfSpace {
+    slot_number: SlotNumber,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SlotInfo {
@@ -17,15 +27,38 @@ pub struct SlotInfo {
 }
 
 pub struct RpcServer {
-    server: Server,
+    _server: Server,
     slot_info_sinks: Arc<Mutex<HashMap<SubscriptionId, Sink>>>,
+    proof_requests: Arc<Mutex<HashMap<SlotNumber, oneshot::Sender<()>>>>,
 }
 
 impl RpcServer {
     pub fn new() -> jsonrpc_ws_server::Result<Self> {
         let mut io = PubSubHandler::new(MetaIoHandler::default());
-        io.add_sync_method("babe_proposeProofOfSpace", move |_params: Params| {
-            Ok(Value::String("TODO".to_string()))
+
+        let proof_requests = Arc::<Mutex<HashMap<SlotNumber, oneshot::Sender<()>>>>::default();
+
+        io.add_sync_method("babe_proposeProofOfSpace", {
+            let proof_requests = Arc::clone(&proof_requests);
+
+            move |params: Params| {
+                match params.parse::<(ProposedProofOfSpace,)>() {
+                    Ok((proposed_proof,)) => {
+                        if let Some(sender) = proof_requests.lock().remove(&proposed_proof.slot_number) {
+                            let _ = sender.send(());
+                        } else {
+                            warn!("babe_proposeProofOfSpace ignored because there is no sender waiting");
+                        }
+                        // TODO
+                        Ok(Value::String("TODO".to_string()))
+                    }
+                    Err(error) => {
+                        warn!("Error in babe_proposeProofOfSpace payload: {}", error);
+                        // TODO: Error
+                        Ok(Value::String("TODO".to_string()))
+                    }
+                }
+            }
         });
         let slot_info_sinks = add_slot_info_subscriptions::<_, _>(&mut io);
 
@@ -35,18 +68,45 @@ impl RpcServer {
             })
             .start(&"127.0.0.1:9945".parse().unwrap())
             .map(|server| {
-                Self { server, slot_info_sinks }
+                Self { _server: server, slot_info_sinks, proof_requests }
             })
     }
 
-    pub fn notify_new_slot(&self, slot_number: SlotNumber, epoch: &Epoch) {
+    pub fn notify_new_slot(
+        &self,
+        slot_number: SlotNumber,
+        epoch: &Epoch,
+    ) -> Option<(PreDigest, AuthorityId)> {
         let params = Params::Array(vec![serde_json::to_value(SlotInfo {
             slot_number,
             epoch_randomness: epoch.randomness.to_vec(),
         }).unwrap()]);
+
+        let (sender, receiver) = oneshot::channel();
+        self.proof_requests.lock().insert(slot_number, sender);
+
         for sink in self.slot_info_sinks.lock().values() {
             let _ = sink.notify(params.clone());
         }
+
+        // Spawning separate thread because recursive `futures::executor::block_on` calls will panic
+        let solution = std::thread::spawn(move || {
+            futures::executor::block_on(async move {
+                let timeout = futures_timer::Delay::new(SOLUTION_TIMEOUT).map(|_| None);
+                let solution = receiver.map(|result| result.ok());
+
+                match future::select(timeout, solution).await {
+                    Either::Left((value1, _)) => value1,
+                    Either::Right((value2, _)) => value2,
+                }
+            })
+        })
+            .join()
+            .ok()
+            .flatten();
+        println!("Solution: {:?}", solution);
+        // TODO: Receive from RPC ^
+        None
     }
 }
 

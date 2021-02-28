@@ -544,7 +544,10 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 			&epoch_descriptor,
 			|slot| Epoch::genesis(&self.config, slot)
 		)?;
-		self.rpc_server.notify_new_slot(slot_number, epoch.as_ref());
+
+		let s = self.rpc_server.notify_new_slot(slot_number, epoch.as_ref());
+		// TODO: Use ^ instead
+
 		let s = authorship::claim_slot(
 			slot_number,
 			epoch.as_ref(),
