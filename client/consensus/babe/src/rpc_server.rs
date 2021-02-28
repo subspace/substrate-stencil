@@ -1,4 +1,4 @@
-use jsonrpc_pubsub::{PubSubHandler, Session, PubSubMetadata, SubscriptionId, Sink, Subscriber};
+use jsonrpc_pubsub::{PubSubHandler, Session, PubSubMetadata, SubscriptionId, Sink, Subscriber, SinkResult};
 use jsonrpc_core::{MetaIoHandler, Middleware, Params, Value};
 use jsonrpc_ws_server::{ServerBuilder, RequestContext, Server};
 use std::sync::Arc;
@@ -28,7 +28,7 @@ pub struct SlotInfo {
 
 pub struct RpcServer {
     _server: Server,
-    slot_info_sinks: Arc<Mutex<HashMap<SubscriptionId, Sink>>>,
+    slot_info_sinks: Arc<Mutex<HashMap<SubscriptionId, Box<dyn (Fn(Value) -> SinkResult) + Send>>>>,
     proof_requests: Arc<Mutex<HashMap<SlotNumber, oneshot::Sender<()>>>>,
 }
 
@@ -38,7 +38,7 @@ impl RpcServer {
 
         let proof_requests = Arc::<Mutex<HashMap<SlotNumber, oneshot::Sender<()>>>>::default();
 
-        io.add_sync_method("babe_proposeProofOfSpace", {
+        io.add_notification("babe_proposeProofOfSpace", {
             let proof_requests = Arc::clone(&proof_requests);
 
             move |params: Params| {
@@ -49,13 +49,9 @@ impl RpcServer {
                         } else {
                             warn!("babe_proposeProofOfSpace ignored because there is no sender waiting");
                         }
-                        // TODO
-                        Ok(Value::String("TODO".to_string()))
                     }
                     Err(error) => {
                         warn!("Error in babe_proposeProofOfSpace payload: {}", error);
-                        // TODO: Error
-                        Ok(Value::String("TODO".to_string()))
                     }
                 }
             }
@@ -77,10 +73,10 @@ impl RpcServer {
         slot_number: SlotNumber,
         epoch: &Epoch,
     ) -> Option<(PreDigest, AuthorityId)> {
-        let params = Params::Array(vec![serde_json::to_value(SlotInfo {
+        let value = serde_json::to_value(SlotInfo {
             slot_number,
             epoch_randomness: epoch.randomness.to_vec(),
-        }).unwrap()]);
+        }).unwrap();
 
         let slot_info_sinks = self.slot_info_sinks.lock();
         if slot_info_sinks.is_empty() {
@@ -91,7 +87,7 @@ impl RpcServer {
         self.proof_requests.lock().insert(slot_number, sender);
 
         for sink in slot_info_sinks.values() {
-            let _ = sink.notify(params.clone());
+            let _ = sink(value.clone());
         }
         drop(slot_info_sinks);
 
@@ -121,13 +117,13 @@ impl RpcServer {
 
 fn add_slot_info_subscriptions<T, S>(
     io: &mut PubSubHandler<T, S>,
-) -> Arc<Mutex<HashMap<SubscriptionId, Sink>>>
+) -> Arc<Mutex<HashMap<SubscriptionId, Box<dyn (Fn(Value) -> SinkResult) + Send>>>>
     where
         T: PubSubMetadata,
         S: Middleware<T>,
 {
     let next_subscription_id = Arc::new(AtomicUsize::new(1));
-    let sinks = Arc::<Mutex<HashMap<SubscriptionId, Sink>>>::default();
+    let sinks = Arc::<Mutex<HashMap<SubscriptionId, Box<dyn (Fn(Value) -> SinkResult) + Send>>>>::default();
     io.add_subscription(
         "babe_slot_info",
         ("babe_subscribeSlotInfo", {
@@ -137,12 +133,22 @@ fn add_slot_info_subscriptions<T, S>(
                 debug!("babe_subscribeSlotInfo");
                 let sinks = Arc::clone(&sinks);
 
-                let subscription_id = SubscriptionId::Number(
-                    next_subscription_id.fetch_add(1, Ordering::SeqCst) as u64,
-                );
+                let subscription_id_num = next_subscription_id.fetch_add(1, Ordering::SeqCst) as u64;
+                let subscription_id = SubscriptionId::Number(subscription_id_num);
                 let sink = subscriber.assign_id(subscription_id.clone()).unwrap();
 
-                sinks.lock().insert(subscription_id, sink);
+                sinks.lock().insert(subscription_id, Box::new(move |value| -> SinkResult {
+                    sink.notify(Params::Map({
+                        let mut map = serde_json::Map::new();
+                        map.insert("result".to_string(), value);
+                        map.insert(
+                            "subscription".to_string(),
+                            serde_json::to_value(&subscription_id_num).unwrap(),
+                        );
+
+                        map
+                    }))
+                }));
             }
         }),
         ("babe_unsubscribeSlotInfo", {
