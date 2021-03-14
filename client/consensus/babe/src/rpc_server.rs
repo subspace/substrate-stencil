@@ -5,11 +5,11 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use futures::{future, FutureExt, StreamExt, SinkExt};
+use futures::{future, FutureExt};
 use log::{debug, warn};
 use crate::{Epoch, SlotNumber};
 use serde::{Serialize, Deserialize};
-use futures::channel::mpsc;
+use futures::channel::oneshot;
 use std::time::Duration;
 use futures::future::Either;
 
@@ -41,14 +41,14 @@ pub struct SlotInfo {
 pub struct RpcServer {
     _server: Server,
     slot_info_sinks: Arc<Mutex<HashMap<SubscriptionId, Box<dyn (Fn(Value) -> SinkResult) + Send>>>>,
-    proof_requests: Arc<Mutex<HashMap<SlotNumber, mpsc::Sender<Option<Solution>>>>>,
+    proof_requests: Arc<Mutex<HashMap<SlotNumber, oneshot::Sender<Solution>>>>,
 }
 
 impl RpcServer {
     pub fn new() -> jsonrpc_ws_server::Result<Self> {
         let mut io = PubSubHandler::new(MetaIoHandler::default());
 
-        let proof_requests = Arc::<Mutex<HashMap<SlotNumber, mpsc::Sender<Option<Solution>>>>>::default();
+        let proof_requests = Arc::<Mutex<HashMap<SlotNumber, oneshot::Sender<Solution>>>>::default();
 
         io.add_notification("babe_proposeProofOfSpace", {
             let proof_requests = Arc::clone(&proof_requests);
@@ -56,8 +56,10 @@ impl RpcServer {
             move |params: Params| {
                 match params.parse::<(ProposedProofOfSpaceResult,)>() {
                     Ok((proposed_proof,)) => {
-                        if let Some(mut sender) = proof_requests.lock().remove(&proposed_proof.slot_number) {
-                            let _ = sender.send(proposed_proof.solution);
+                        if let Some(sender) = proof_requests.lock().remove(&proposed_proof.slot_number) {
+                            if let Some(solution) = proposed_proof.solution {
+                                let _ = sender.send(solution);
+                            }
                         } else {
                             warn!("babe_proposeProofOfSpace ignored because there is no sender waiting");
                         }
@@ -96,7 +98,7 @@ impl RpcServer {
             return None;
         }
 
-        let (sender, mut receiver) = mpsc::channel(1);
+        let (sender, receiver) = oneshot::channel();
         self.proof_requests.lock().insert(slot_number, sender);
 
         for sink in slot_info_sinks.values() {
@@ -109,10 +111,9 @@ impl RpcServer {
             futures::executor::block_on(async move {
                 let timeout = futures_timer::Delay::new(SOLUTION_TIMEOUT).map(|_| None);
                 let solution = async move {
-                    while let Some(solution) = receiver.next().await {
-                        if let Some(solution) = solution {
-                            return Some(solution);
-                        }
+                    // TODO: This construction will cause timeout if none of farmers reply
+                    if let Ok(solution) = receiver.await {
+                        return Some(solution);
                     }
 
                     None

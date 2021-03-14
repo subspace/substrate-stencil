@@ -125,6 +125,7 @@ use sp_blockchain::{
 use codec::{Encode, Decode};
 use sp_api::ApiExt;
 use crate::rpc_server::RpcServer;
+use sp_consensus_babe::digests::{SpartanPreDigest, Solution};
 
 mod verification;
 mod migration;
@@ -530,20 +531,27 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 			|slot| Epoch::genesis(&self.config, slot)
 		)?;
 
-		let s = self.rpc_server.notify_new_slot(slot_number, epoch.as_ref());
-		// TODO: Use ^ instead
+		let solution = self.rpc_server.notify_new_slot(slot_number, epoch.as_ref());
 
-		// let s = authorship::claim_slot(
-		// 	slot_number,
-		// 	epoch.as_ref(),
-		// 	&self.keystore,
-		// );
+		// TODO
+		let claim = solution.map(|solution| {
+			PreDigest::Primary(SpartanPreDigest {
+				solution: Solution {
+					public_key: AuthorityId::from_slice(&solution.public_key),
+					nonce: solution.nonce,
+					encoding: solution.encoding,
+					signature: solution.signature,
+					tag: solution.tag,
+					randomness: solution.randomness
+				},
+				slot_number
+			})});
 
-		if s.is_some() {
+		if claim.is_some() {
 			debug!(target: "babe", "Claimed slot {}", slot_number);
 		}
 
-		None
+		claim
 	}
 
 	fn notify_slot(
