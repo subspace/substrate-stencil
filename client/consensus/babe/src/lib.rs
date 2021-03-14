@@ -480,7 +480,7 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 	Error: std::error::Error + Send + From<ConsensusError> + From<I::Error> + 'static,
 {
 	type EpochData = ViableEpochDescriptor<B::Hash, NumberFor<B>, Epoch>;
-	type Claim = (PreDigest, AuthorityId);
+	type Claim = PreDigest;
 	type SyncOracle = SO;
 	type CreateProposer = Pin<Box<
 		dyn Future<Output = Result<E::Proposer, sp_consensus::Error>> + Send + 'static
@@ -574,7 +574,7 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 		claim: &Self::Claim,
 	) -> Vec<sp_runtime::DigestItem<B::Hash>> {
 		vec![
-			<DigestItemFor<B> as CompatibleDigestItem>::babe_pre_digest(claim.0.clone()),
+			<DigestItemFor<B> as CompatibleDigestItem>::babe_pre_digest(claim.clone()),
 		]
 	}
 
@@ -590,11 +590,11 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 		sp_consensus::Error> + Send + 'static>
 	{
 		let keystore = self.keystore.clone();
-		Box::new(move |header, header_hash, body, storage_changes, (_, public), epoch_descriptor| {
+		Box::new(move |header, header_hash, body, storage_changes, pre_digest, epoch_descriptor| {
 			// sign the pre-sealed hash of the block and then
 			// add it to a digest item.
-			let public_type_pair = public.clone().into();
-			let public = public.to_raw_vec();
+			let public_type_pair = pre_digest.public_key().clone().into();
+			let public = pre_digest.public_key().to_raw_vec();
 			let signature = keystore.read()
 				.sign_with(
 					<AuthorityId as AppKey>::ID,
