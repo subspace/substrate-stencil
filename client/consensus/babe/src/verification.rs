@@ -16,13 +16,11 @@
 
 //! Verification for BABE headers.
 use sp_runtime::{traits::Header, traits::DigestItemFor};
-use sp_core::{Pair, Public};
-use sp_consensus_babe::{make_transcript, AuthoritySignature, SlotNumber, AuthorityPair, AuthorityId};
-use sp_consensus_babe::digests::{PreDigest, PrimaryPreDigest, CompatibleDigestItem, SpartanPreDigest};
+use sp_consensus_babe::{SlotNumber, AuthorityId};
+use sp_consensus_babe::digests::{PreDigest, CompatibleDigestItem, SpartanPreDigest};
 use sc_consensus_slots::CheckedHeader;
 use log::{debug, trace};
 use super::{find_pre_digest, babe_err, Epoch, BlockT, Error};
-use super::authorship::{calculate_primary_threshold, check_primary_threshold};
 
 /// BABE verification parameters
 pub(super) struct VerificationParams<'a, B: 'a + BlockT> {
@@ -61,7 +59,6 @@ pub(super) fn check_header<B: BlockT + Sized>(
 		epoch,
 	} = params;
 
-	let authorities = &epoch.authorities;
 	let pre_digest = pre_digest.map(Ok).unwrap_or_else(|| find_pre_digest::<B>(&header))?;
 
 	trace!(target: "babe", "Checking header");
@@ -70,7 +67,8 @@ pub(super) fn check_header<B: BlockT + Sized>(
 		None => return Err(babe_err(Error::HeaderUnsealed(header.hash()))),
 	};
 
-	let sig = seal.as_babe_seal().ok_or_else(|| {
+	// TODO
+	let _sig = seal.as_babe_seal().ok_or_else(|| {
 		babe_err(Error::HeaderBadSeal(header.hash()))
 	})?;
 
@@ -120,10 +118,10 @@ pub(super) struct VerifiedHeaderInfo<B: BlockT> {
 /// is valid. Additionally, the weight of this block must increase compared to
 /// its parent since it is a primary block.
 fn check_primary_header<B: BlockT + Sized>(
-	pre_hash: B::Hash,
-	pre_digest: &SpartanPreDigest,
-	epoch: &Epoch,
-	c: (u64, u64),
+	_pre_hash: B::Hash,
+	_pre_digest: &SpartanPreDigest,
+	_epoch: &Epoch,
+	_c: (u64, u64),
 ) -> Result<(), Error<B>> {
 	// TODO: Actually verify
 	Ok(())

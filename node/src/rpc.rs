@@ -100,7 +100,6 @@ pub fn create_full<C, P, SC>(
 				keystore,
 				babe_config,
 				select_chain,
-				deny_unsafe,
 			),
 		)
 	);

@@ -43,7 +43,7 @@ use sp_runtime::transaction_validity::{
 };
 use sp_runtime::{DispatchResult, Perbill};
 use sp_staking::{
-	offence::{Kind, Offence, OffenceError, ReportOffence},
+	offence::{Kind, Offence, OffenceError},
 	SessionIndex,
 };
 use sp_std::prelude::*;
@@ -123,14 +123,14 @@ where
 	T: Trait + frame_system::offchain::SendTransactionTypes<Call<T>>,
 {
 	fn report_offence(
-		reporters: Vec<T::AccountId>,
-		offence: BabeEquivocationOffence<T::KeyOwnerIdentification>,
+		_reporters: Vec<T::AccountId>,
+		_offence: BabeEquivocationOffence<T::KeyOwnerIdentification>,
 	) -> Result<(), OffenceError> {
 		// TODO
 		Ok(())
 	}
 
-	fn is_known_offence(offenders: &[T::KeyOwnerIdentification], time_slot: &SlotNumber) -> bool {
+	fn is_known_offence(_offenders: &[T::KeyOwnerIdentification], _time_slot: &SlotNumber) -> bool {
 		// TODO
 		false
 	}

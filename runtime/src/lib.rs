@@ -23,7 +23,6 @@ use sp_runtime::traits::{
 	Convert, OpaqueKeys,
 };
 use sp_api::impl_runtime_apis;
-use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use sp_version::RuntimeVersion;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;

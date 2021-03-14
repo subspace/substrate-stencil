@@ -18,34 +18,19 @@
 
 //! RPC api for babe.
 
-use sc_consensus_babe::{Epoch, authorship, Config};
-use futures::{FutureExt as _, TryFutureExt as _};
-use jsonrpc_core::{
-	Error as RpcError,
-	futures::future as rpc_future,
-};
+use sc_consensus_babe::{Epoch, Config};
 use jsonrpc_derive::rpc;
-use sc_consensus_epochs::{descendent_query, Epoch as EpochT, SharedEpochChanges};
+use sc_consensus_epochs::{SharedEpochChanges};
 use sp_consensus_babe::{
-	AuthorityId,
 	BabeApi as BabeRuntimeApi,
-	digests::PreDigest,
 };
 use serde::{Deserialize, Serialize};
-use sp_core::{
-	crypto::Public,
-	traits::BareCryptoStore,
-};
-use sp_application_crypto::AppKey;
 use sc_keystore::KeyStorePtr;
-use sc_rpc_api::DenyUnsafe;
-use sp_api::{ProvideRuntimeApi, BlockId};
-use sp_runtime::traits::{Block as BlockT, Header as _};
+use sp_api::{ProvideRuntimeApi};
+use sp_runtime::traits::{Block as BlockT};
 use sp_consensus::{SelectChain, Error as ConsensusError};
 use sp_blockchain::{HeaderBackend, HeaderMetadata, Error as BlockChainError};
-use std::{collections::HashMap, sync::Arc};
-
-type FutureResult<T> = Box<dyn rpc_future::Future<Item = T, Error = RpcError> + Send>;
+use std::{sync::Arc};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SlotInfo {
@@ -72,8 +57,6 @@ pub struct BabeRpcHandler<B: BlockT, C, SC> {
 	babe_config: Config,
 	/// The SelectChain strategy
 	select_chain: SC,
-	/// Whether to deny unsafe calls
-	deny_unsafe: DenyUnsafe,
 }
 
 impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
@@ -84,7 +67,6 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 		keystore: KeyStorePtr,
 		babe_config: Config,
 		select_chain: SC,
-		deny_unsafe: DenyUnsafe,
 	) -> Self {
 		Self {
 			client,
@@ -92,7 +74,6 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 			keystore,
 			babe_config,
 			select_chain,
-			deny_unsafe,
 		}
 	}
 }
@@ -135,31 +116,6 @@ impl From<Error> for jsonrpc_core::Error {
 			data: None,
 		}
 	}
-}
-
-/// fetches the epoch data for a given slot_number.
-fn epoch_data<B, C, SC>(
-	epoch_changes: &SharedEpochChanges<B, Epoch>,
-	client: &Arc<C>,
-	babe_config: &Config,
-	slot_number: u64,
-	select_chain: &SC,
-) -> Result<Epoch, Error>
-	where
-		B: BlockT,
-		C: HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
-		SC: SelectChain<B>,
-{
-	let parent = select_chain.best_chain()?;
-	epoch_changes.lock().epoch_data_for_child_of(
-		descendent_query(&**client),
-		&parent.hash(),
-		parent.number().clone(),
-		slot_number,
-		|slot| Epoch::genesis(&babe_config, slot),
-	)
-		.map_err(|e| Error::Consensus(ConsensusError::ChainLookup(format!("{:?}", e))))?
-		.ok_or(Error::Consensus(ConsensusError::InvalidAuthoritiesSet))
 }
 
 #[cfg(test)]

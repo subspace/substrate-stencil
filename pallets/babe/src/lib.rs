@@ -25,16 +25,15 @@ use codec::{Decode, Encode};
 use frame_support::{
 	decl_error, decl_module, decl_storage,
 	dispatch::DispatchResultWithPostInfo,
-	traits::{FindAuthor, Get, KeyOwnerProofSystem, Randomness as RandomnessT},
+	traits::{Get, KeyOwnerProofSystem, Randomness as RandomnessT},
 	weights::{Pays, Weight},
 	Parameter,
 };
 use frame_system::{ensure_none, ensure_signed};
-use sp_application_crypto::Public;
 use sp_runtime::{
 	generic::DigestItem,
 	traits::{Hash, IsMember, One, SaturatedConversion, Saturating},
-	ConsensusEngineId, KeyTypeId,
+	KeyTypeId,
 };
 use sp_session::{GetSessionNumber, GetValidatorCount};
 use sp_std::{prelude::*, result};

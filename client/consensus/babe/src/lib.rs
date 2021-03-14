@@ -122,7 +122,6 @@ use sp_blockchain::{
 	Result as ClientResult, Error as ClientError,
 	HeaderBackend, ProvideCache, HeaderMetadata
 };
-use schnorrkel::SignatureError;
 use codec::{Encode, Decode};
 use sp_api::ApiExt;
 use crate::rpc_server::RpcServer;
@@ -131,7 +130,6 @@ mod verification;
 mod migration;
 
 pub mod aux_schema;
-pub mod authorship;
 #[cfg(test)]
 mod tests;
 mod rpc_server;
@@ -224,16 +222,8 @@ enum Error<B: BlockT> {
 	HeaderBadSeal(B::Hash),
 	#[display(fmt = "Header {:?} is unsealed", _0)]
 	HeaderUnsealed(B::Hash),
-	#[display(fmt = "Slot author not found")]
-	SlotAuthorNotFound,
 	#[display(fmt = "Secondary slot assignments are disabled for the current epoch.")]
 	SecondarySlotAssignmentsDisabled,
-	#[display(fmt = "Bad signature on {:?}", _0)]
-	BadSignature(B::Hash),
-	#[display(fmt = "VRF verification of block by author {:?} failed: threshold {} exceeded", _0, _1)]
-	VRFVerificationOfBlockFailed(AuthorityId, u128),
-	#[display(fmt = "VRF verification failed: {:?}", _0)]
-	VRFVerificationFailed(SignatureError),
 	#[display(fmt = "Could not fetch parent header: {:?}", _0)]
 	FetchParentHeader(sp_blockchain::Error),
 	#[display(fmt = "Expected epoch change to happen at {:?}, s{}", _0, _1)]
