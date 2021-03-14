@@ -202,6 +202,10 @@ pub fn new_full_base(
 			force_authoring,
 			babe_link,
 			can_author_with,
+			on_claim_slot: Box::new(|_slot_number, _epoch| {
+				// TODO: Wire this up with RPC to send challenges to workers and receive responses
+				None
+			}),
 		};
 
 		let babe = sc_consensus_babe::start_babe(babe_config)?;

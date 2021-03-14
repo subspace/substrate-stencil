@@ -106,8 +106,6 @@ use sc_client_api::{
 	BlockchainEvents, ProvideUncles,
 };
 use sp_block_builder::BlockBuilder as BlockBuilderApi;
-use futures::channel::mpsc::{channel, Sender, Receiver};
-use retain_mut::RetainMut;
 
 use futures::prelude::*;
 use log::{debug, info, log, trace, warn};
@@ -346,10 +344,13 @@ pub struct BabeParams<B: BlockT, C, E, I, SO, SC, CAW> {
 
 	/// Checks if the current native implementation can author with a runtime at a given block.
 	pub can_author_with: CAW,
+
+	/// This callback is called when new slot arrives and there is a chance to try claim it
+	pub on_claim_slot: Box<dyn (Fn(SlotNumber, &Epoch) -> Option<PreDigest>) + Send + Sync + 'static>,
 }
 
 /// Start the babe worker.
-pub fn start_babe<B, C, SC, E, I, SO, CAW, Error>(BabeParams {
+pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	keystore,
 	client,
 	select_chain,
@@ -360,8 +361,9 @@ pub fn start_babe<B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	force_authoring,
 	babe_link,
 	can_author_with,
+	on_claim_slot,
 }: BabeParams<B, C, E, I, SO, SC, CAW>) -> Result<
-	BabeWorker<B>,
+	BabeWorker,
 	sp_consensus::Error,
 > where
 	B: BlockT,
@@ -378,7 +380,6 @@ pub fn start_babe<B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	CAW: CanAuthorWith<B> + Send + 'static,
 {
 	let config = babe_link.config;
-	let slot_notification_sinks = Arc::new(Mutex::new(Vec::new()));
 
 	let rpc_server = RpcServer::new()
 		.expect("Failed to start RPC server");
@@ -391,8 +392,8 @@ pub fn start_babe<B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 		force_authoring,
 		keystore,
 		epoch_changes: babe_link.epoch_changes.clone(),
-		slot_notification_sinks: slot_notification_sinks.clone(),
 		config: config.clone(),
+		on_claim_slot,
 		rpc_server,
 	};
 
@@ -415,32 +416,16 @@ pub fn start_babe<B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	);
 	Ok(BabeWorker {
 		inner: Box::pin(inner),
-		slot_notification_sinks,
 	})
 }
 
 /// Worker for Babe which implements `Future<Output=()>`. This must be polled.
 #[must_use]
-pub struct BabeWorker<B: BlockT> {
+pub struct BabeWorker {
 	inner: Pin<Box<dyn futures::Future<Output=()> + Send + 'static>>,
-	slot_notification_sinks: Arc<Mutex<Vec<Sender<(u64, ViableEpochDescriptor<B::Hash, NumberFor<B>, Epoch>)>>>>,
 }
 
-impl<B: BlockT> BabeWorker<B> {
-	/// Return an event stream of notifications for when new slot happens, and the corresponding
-	/// epoch descriptor.
-	pub fn slot_notification_stream(
-		&self
-	) -> Receiver<(u64, ViableEpochDescriptor<B::Hash, NumberFor<B>, Epoch>)> {
-		const CHANNEL_BUFFER_SIZE: usize = 1024;
-
-		let (sink, stream) = channel(CHANNEL_BUFFER_SIZE);
-		self.slot_notification_sinks.lock().push(sink);
-		stream
-	}
-}
-
-impl<B: BlockT> futures::Future for BabeWorker<B> {
+impl futures::Future for BabeWorker {
 	type Output = ();
 
 	fn poll(
@@ -451,9 +436,6 @@ impl<B: BlockT> futures::Future for BabeWorker<B> {
 	}
 }
 
-/// Slot notification sinks.
-type SlotNotificationSinks<B> = Arc<Mutex<Vec<Sender<(u64, ViableEpochDescriptor<<B as BlockT>::Hash, NumberFor<B>, Epoch>)>>>>;
-
 struct BabeSlotWorker<B: BlockT, C, E, I, SO> {
 	client: Arc<C>,
 	block_import: Arc<Mutex<I>>,
@@ -462,8 +444,8 @@ struct BabeSlotWorker<B: BlockT, C, E, I, SO> {
 	force_authoring: bool,
 	keystore: KeyStorePtr,
 	epoch_changes: SharedEpochChanges<B, Epoch>,
-	slot_notification_sinks: SlotNotificationSinks<B>,
 	config: Config,
+	on_claim_slot: Box<dyn (Fn(SlotNumber, &Epoch) -> Option<PreDigest>) + Send + Sync + 'static>,
 	rpc_server: RpcServer,
 }
 
@@ -531,49 +513,32 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 			|slot| Epoch::genesis(&self.config, slot)
 		)?;
 
-		let solution = self.rpc_server.notify_new_slot(slot_number, epoch.as_ref());
 
-		// TODO
-		let claim = solution.map(|solution| {
-			PreDigest::Primary(SpartanPreDigest {
-				solution: Solution {
-					public_key: AuthorityId::from_slice(&solution.public_key),
-					nonce: solution.nonce,
-					encoding: solution.encoding,
-					signature: solution.signature,
-					tag: solution.tag,
-					randomness: solution.randomness
-				},
-				slot_number
-			})});
+		let claim = (self.on_claim_slot)(slot_number, epoch.as_ref())
+			// TODO remove built-in RPC server
+			.or_else(|| {
+				self.rpc_server
+					.notify_new_slot(slot_number, epoch.as_ref())
+					.map(|solution| {
+						PreDigest::Primary(SpartanPreDigest {
+							solution: Solution {
+								public_key: AuthorityId::from_slice(&solution.public_key),
+								nonce: solution.nonce,
+								encoding: solution.encoding,
+								signature: solution.signature,
+								tag: solution.tag,
+								randomness: solution.randomness
+							},
+							slot_number
+						})
+					})
+			});
 
 		if claim.is_some() {
 			debug!(target: "babe", "Claimed slot {}", slot_number);
 		}
 
 		claim
-	}
-
-	fn notify_slot(
-		&self,
-		_parent_header: &B::Header,
-		slot_number: SlotNumber,
-		epoch_descriptor: &ViableEpochDescriptor<B::Hash, NumberFor<B>, Epoch>,
-	) {
-		self.slot_notification_sinks.lock()
-			.retain_mut(|sink| {
-				match sink.try_send((slot_number, epoch_descriptor.clone())) {
-					Ok(()) => true,
-					Err(e) => {
-						if e.is_full() {
-							warn!(target: "babe", "Trying to notify a slot but the channel is full");
-							true
-						} else {
-							false
-						}
-					},
-				}
-			});
 	}
 
 	fn pre_digest_data(
