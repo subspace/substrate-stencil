@@ -564,23 +564,25 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 	{
 		let keystore = self.keystore.clone();
 		Box::new(move |header, header_hash, body, storage_changes, pre_digest, epoch_descriptor| {
+			// TODO: Proper signature or fix altogether
 			// sign the pre-sealed hash of the block and then
 			// add it to a digest item.
-			let public_type_pair = pre_digest.public_key().clone().into();
-			let public = pre_digest.public_key().to_raw_vec();
-			let signature = keystore.read()
-				.sign_with(
-					<AuthorityId as AppKey>::ID,
-					&public_type_pair,
-					header_hash.as_ref()
-				)
-				.map_err(|e| sp_consensus::Error::CannotSign(
-					public.clone(), e.to_string(),
-				))?;
-			let signature: AuthoritySignature = signature.clone().try_into()
-				.map_err(|_| sp_consensus::Error::InvalidSignature(
-					signature, public
-				))?;
+			// let public_type_pair = pre_digest.public_key().clone().into();
+			// let public = pre_digest.public_key().to_raw_vec();
+			// let signature = keystore.read()
+			// 	.sign_with(
+			// 		<AuthorityId as AppKey>::ID,
+			// 		&public_type_pair,
+			// 		header_hash.as_ref()
+			// 	)
+			// 	.map_err(|e| sp_consensus::Error::CannotSign(
+			// 		public.clone(), e.to_string(),
+			// 	))?;
+			// let signature: AuthoritySignature = signature.clone().try_into()
+			// 	.map_err(|_| sp_consensus::Error::InvalidSignature(
+			// 		signature, public
+			// 	))?;
+			let signature = AuthoritySignature::default();
 			let digest_item = <DigestItemFor<B> as CompatibleDigestItem>::babe_seal(signature.into());
 
 			let mut import_block = BlockImportParams::new(BlockOrigin::Own, header);
