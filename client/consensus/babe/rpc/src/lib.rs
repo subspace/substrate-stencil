@@ -68,7 +68,7 @@ const SOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 type FutureResult<T> = Box<dyn rpc_future::Future<Item = T, Error = RpcError> + Send>;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Solution {
 	pub public_key: [u8; 32],
 	pub nonce: u32,
@@ -78,7 +78,7 @@ pub struct Solution {
 	pub randomness: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ProposedProofOfSpaceResult {
 	slot_number: SlotNumber,
 	solution: Option<Solution>,
@@ -92,7 +92,7 @@ pub trait BabeApi {
 
 	// TODO: Add ProposedProofOfSpaceResult as a parameter here
 	#[rpc(name = "babe_proposeProofOfSpace")]
-	fn propose_proof_of_space(&self) -> FutureResult<()>;
+	fn propose_proof_of_space(&self, proposed_proof_of_space_result: ProposedProofOfSpaceResult) -> FutureResult<()>;
 
 
 	/// Slot info subscription
@@ -233,10 +233,13 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 {
 	type Metadata = sc_rpc_api::Metadata;
 
-	fn propose_proof_of_space(&self) -> FutureResult<()> {
-		let future = async {
-			println!("Received block proposal message");
-			// TODO
+	fn propose_proof_of_space(&self, proposed_proof_of_space_result: ProposedProofOfSpaceResult) -> FutureResult<()> {
+		let sender = self.solution_senders.lock().get(&proposed_proof_of_space_result.slot_number).cloned();
+		let future = async move {
+			if let Some(mut sender) = sender {
+				let _ = sender.send(proposed_proof_of_space_result.solution).await;
+			}
+
 			Ok(())
 		}.boxed();
 		Box::new(future.compat())
