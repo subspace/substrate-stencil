@@ -5,13 +5,13 @@
 
 #![warn(missing_docs)]
 
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 
 use node_template_runtime::{
 	opaque::Block, AccountId, Balance,
 	Index, Hash,
 };
-use sc_consensus_babe::{Config, Epoch};
+use sc_consensus_babe::{Config, Epoch, NewSlotNotifier};
 use sc_consensus_epochs::SharedEpochChanges;
 use sc_keystore::KeyStorePtr;
 use sp_api::ProvideRuntimeApi;
@@ -22,6 +22,8 @@ use sp_consensus_babe::BabeApi;
 pub use sc_rpc_api::DenyUnsafe;
 use sp_transaction_pool::TransactionPool;
 use sc_client_api::ExecutorProvider;
+use sc_rpc::SubscriptionTaskExecutor;
+use sc_consensus_babe_rpc::{SlotInfo, Solution};
 
 /// Extra dependencies for BABE.
 pub struct BabeDeps {
@@ -31,6 +33,9 @@ pub struct BabeDeps {
 	pub shared_epoch_changes: SharedEpochChanges<Block, Epoch>,
 	/// The keystore that manages the keys of the node.
 	pub keystore: KeyStorePtr,
+	/// Executor to drive the subscription manager in the Grandpa RPC handler.
+	pub subscription_executor: SubscriptionTaskExecutor,
+	pub new_slot_notifier: NewSlotNotifier,
 }
 
 /// Full client dependencies.
@@ -81,6 +86,8 @@ pub fn create_full<C, P, SC>(
 		keystore,
 		babe_config,
 		shared_epoch_changes,
+		subscription_executor,
+		new_slot_notifier,
 	} = babe;
 
 	io.extend_with(
@@ -100,6 +107,8 @@ pub fn create_full<C, P, SC>(
 				keystore,
 				babe_config,
 				select_chain,
+				subscription_executor,
+				new_slot_notifier,
 			),
 		)
 	);

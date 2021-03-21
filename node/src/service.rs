@@ -1,6 +1,6 @@
 //! Service and ServiceFactory implementation. Specialized wrapper over substrate service.
 
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use sc_client_api::{ExecutorProvider, RemoteBackend};
 use node_template_runtime::{self, opaque::Block, RuntimeApi};
 use sc_service::{
@@ -12,6 +12,8 @@ use sp_runtime::traits::Block as BlockT;
 use sc_executor::native_executor_instance;
 pub use sc_executor::NativeExecutor;
 use sc_network::NetworkService;
+use sc_consensus_babe_rpc::{SlotInfo, Solution};
+use sc_consensus_babe::NewSlotNotifier;
 
 // Our native executor instance.
 native_executor_instance!(
@@ -26,15 +28,13 @@ type FullBackend = sc_service::TFullBackend<Block>;
 type FullSelectChain = sc_consensus::LongestChain<FullBackend, Block>;
 type LightClient = sc_service::TLightClient<Block, RuntimeApi, Executor>;
 
-pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponents<
+pub fn new_partial(
+	config: &Configuration,
+) -> Result<sc_service::PartialComponents<
 	FullClient, FullBackend, FullSelectChain,
 	sp_consensus::DefaultImportQueue<Block, FullClient>,
 	sc_transaction_pool::FullPool<Block, FullClient>,
 	(
-		impl Fn(
-			crate::rpc::DenyUnsafe,
-			sc_rpc::SubscriptionTaskExecutor,
-		) -> crate::rpc::IoHandler,
 		(
 			sc_consensus_babe::BabeBlockImport<Block, FullClient, Arc<FullClient>>,
 			sc_consensus_babe::BabeLink<Block>,
@@ -77,40 +77,10 @@ pub fn new_partial(config: &Configuration) -> Result<sc_service::PartialComponen
 
 	let import_setup = (block_import, babe_link);
 
-	let (rpc_extensions_builder,) = {
-		let (_, babe_link) = &import_setup;
-
-		let babe_config = babe_link.config().clone();
-		let shared_epoch_changes = babe_link.epoch_changes().clone();
-
-		let client = client.clone();
-		let pool = transaction_pool.clone();
-		let select_chain = select_chain.clone();
-		let keystore = keystore.clone();
-
-		let rpc_extensions_builder = move |deny_unsafe, _subscription_executor| {
-			let deps = crate::rpc::FullDeps {
-				client: client.clone(),
-				pool: pool.clone(),
-				select_chain: select_chain.clone(),
-				deny_unsafe,
-				babe: crate::rpc::BabeDeps {
-					babe_config: babe_config.clone(),
-					shared_epoch_changes: shared_epoch_changes.clone(),
-					keystore: keystore.clone(),
-				},
-			};
-
-			crate::rpc::create_full(deps)
-		};
-
-		(rpc_extensions_builder,)
-	};
-
 	Ok(sc_service::PartialComponents {
 		client, backend, task_manager, keystore, select_chain, import_queue, transaction_pool,
 		inherent_data_providers,
-		other: (rpc_extensions_builder, import_setup)
+		other: (import_setup,)
 	})
 }
 
@@ -134,7 +104,7 @@ pub fn new_full_base(
 	let sc_service::PartialComponents {
 		client, backend, mut task_manager, import_queue, keystore, select_chain, transaction_pool,
 		inherent_data_providers,
-		other: (rpc_extensions_builder, import_setup),
+		other: (import_setup,),
 	} = new_partial(&config)?;
 
 	let (network, network_status_sinks, system_rpc_tx, network_starter) =
@@ -161,6 +131,75 @@ pub fn new_full_base(
 	let prometheus_registry = config.prometheus_registry().cloned();
 	let telemetry_connection_sinks = sc_service::TelemetryConnectionSinks::default();
 
+	let (block_import, babe_link) = import_setup.clone();
+
+	(with_startup_data)(&block_import, &babe_link);
+
+	let new_slot_notifier;
+
+	// if let sc_service::config::Role::Authority { .. } = &role {
+		let proposer = sc_basic_authorship::ProposerFactory::new(
+			client.clone(),
+			transaction_pool.clone(),
+			prometheus_registry.as_ref(),
+		);
+
+		let can_author_with =
+			sp_consensus::CanAuthorWithNativeVersion::new(client.executor().clone());
+
+		let babe_config = sc_consensus_babe::BabeParams {
+			keystore: keystore.clone(),
+			client: client.clone(),
+			select_chain: select_chain.clone(),
+			env: proposer,
+			block_import,
+			sync_oracle: network.clone(),
+			inherent_data_providers: inherent_data_providers.clone(),
+			force_authoring,
+			babe_link,
+			can_author_with,
+			on_claim_slot: Box::new(|_slot_number, _epoch| {
+				// TODO: Wire this up with RPC to send challenges to workers and receive responses
+				None
+			}),
+		};
+
+		let babe = sc_consensus_babe::start_babe(babe_config)?;
+		new_slot_notifier = babe.get_new_slot_notifier();
+		task_manager.spawn_essential_handle().spawn_blocking("babe-proposer", babe);
+	// }
+
+	let (rpc_extensions_builder,) = {
+		let (_, babe_link) = &import_setup;
+
+		let babe_config = babe_link.config().clone();
+		let shared_epoch_changes = babe_link.epoch_changes().clone();
+
+		let client = client.clone();
+		let pool = transaction_pool.clone();
+		let keystore = keystore.clone();
+
+		let rpc_extensions_builder = move |deny_unsafe, subscription_executor| {
+			let deps = crate::rpc::FullDeps {
+				client: client.clone(),
+				pool: pool.clone(),
+				select_chain: select_chain.clone(),
+				deny_unsafe,
+				babe: crate::rpc::BabeDeps {
+					babe_config: babe_config.clone(),
+					shared_epoch_changes: shared_epoch_changes.clone(),
+					keystore: keystore.clone(),
+					subscription_executor,
+					new_slot_notifier: Arc::clone(&new_slot_notifier),
+				},
+			};
+
+			crate::rpc::create_full(deps)
+		};
+
+		(rpc_extensions_builder,)
+	};
+
 	sc_service::spawn_tasks(sc_service::SpawnTasksParams {
 		config,
 		backend: backend.clone(),
@@ -176,41 +215,6 @@ pub fn new_full_base(
 		network_status_sinks: network_status_sinks.clone(),
 		system_rpc_tx,
 	})?;
-
-	let (block_import, babe_link) = import_setup;
-
-	(with_startup_data)(&block_import, &babe_link);
-
-	if let sc_service::config::Role::Authority { .. } = &role {
-		let proposer = sc_basic_authorship::ProposerFactory::new(
-			client.clone(),
-			transaction_pool.clone(),
-			prometheus_registry.as_ref(),
-		);
-
-		let can_author_with =
-			sp_consensus::CanAuthorWithNativeVersion::new(client.executor().clone());
-
-		let babe_config = sc_consensus_babe::BabeParams {
-			keystore: keystore.clone(),
-			client: client.clone(),
-			select_chain,
-			env: proposer,
-			block_import,
-			sync_oracle: network.clone(),
-			inherent_data_providers: inherent_data_providers.clone(),
-			force_authoring,
-			babe_link,
-			can_author_with,
-			on_claim_slot: Box::new(|_slot_number, _epoch| {
-				// TODO: Wire this up with RPC to send challenges to workers and receive responses
-				None
-			}),
-		};
-
-		let babe = sc_consensus_babe::start_babe(babe_config)?;
-		task_manager.spawn_essential_handle().spawn_blocking("babe-proposer", babe);
-	}
 
 	// // Spawn authority discovery module.
 	// if matches!(role, Role::Authority{..} | Role::Sentry {..}) {

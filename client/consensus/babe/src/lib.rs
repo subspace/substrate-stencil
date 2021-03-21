@@ -124,6 +124,7 @@ use codec::{Encode, Decode};
 use sp_api::ApiExt;
 use crate::rpc_server::RpcServer;
 use sp_consensus_babe::digests::{SpartanPreDigest, Solution};
+use std::sync::mpsc;
 
 mod verification;
 mod migration;
@@ -132,6 +133,8 @@ pub mod aux_schema;
 #[cfg(test)]
 mod tests;
 mod rpc_server;
+
+pub type NewSlotNotifier = Arc<Box<dyn (Fn() -> mpsc::Receiver<(SlotInfo, mpsc::SyncSender<Option<Solution>>)>) + Send + Sync>>;
 
 /// BABE epoch information
 #[derive(Decode, Encode, PartialEq, Eq, Clone, Debug)]
@@ -433,6 +436,13 @@ impl futures::Future for BabeWorker {
 		cx: &mut futures::task::Context
 	) -> futures::task::Poll<Self::Output> {
 		self.inner.as_mut().poll(cx)
+	}
+}
+
+impl BabeWorker {
+	pub fn get_new_slot_notifier(&self) -> NewSlotNotifier {
+		// TODO: Implement
+		unimplemented!()
 	}
 }
 
