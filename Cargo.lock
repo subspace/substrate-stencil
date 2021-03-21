@@ -5540,11 +5540,13 @@ version = "0.8.1"
 dependencies = [
  "derive_more",
  "futures 0.3.12",
+ "futures-timer 3.0.2",
  "jsonrpc-core 15.1.0",
  "jsonrpc-core-client",
  "jsonrpc-derive 15.1.0",
  "jsonrpc-pubsub 15.1.0",
  "log",
+ "parking_lot 0.10.2",
  "sc-consensus",
  "sc-consensus-babe",
  "sc-consensus-epochs",

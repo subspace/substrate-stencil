@@ -392,7 +392,7 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	let rpc_server = RpcServer::new()
 		.expect("Failed to start RPC server");
 
-	let new_slot_senders: Arc<Mutex<Vec<mpsc::SyncSender<(NewSlotInfo, mpsc::SyncSender<Option<Solution>>)>>>> = Arc::new(Mutex::new(Vec::new()));
+	let new_slot_senders: Arc<Mutex<Vec<mpsc::SyncSender<(NewSlotInfo, mpsc::SyncSender<Option<Solution>>)>>>> = Arc::default();
 
 	let worker = BabeSlotWorker {
 		client: client.clone(),

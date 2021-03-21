@@ -20,7 +20,7 @@
 
 use std::io::Write;
 use sc_consensus_babe::{Epoch, Config, SlotNumber, NewSlotNotifier, NewSlotInfo};
-use futures::{FutureExt as _, TryFutureExt as _, SinkExt, TryStreamExt, compat::Compat as _};
+use futures::{FutureExt as _, TryFutureExt as _, SinkExt, TryStreamExt, compat::Compat as _, StreamExt};
 use jsonrpc_core::{
 	Error as RpcError,
 	futures::future as rpc_future,
@@ -55,12 +55,19 @@ use sp_runtime::traits::{Block as BlockT, Header as _};
 use sp_consensus::{SelectChain, Error as ConsensusError};
 use sp_blockchain::{HeaderBackend, HeaderMetadata, Error as BlockChainError};
 use std::{collections::HashMap, sync::Arc};
-use log::warn;
+use log::{debug, warn};
 use std::sync::mpsc;
+use parking_lot::Mutex;
+use futures::channel::mpsc::UnboundedSender;
+use futures::channel::oneshot;
+use futures::future;
+use futures::future::Either;
+use std::time::Duration;
+
+const SOLUTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 type FutureResult<T> = Box<dyn rpc_future::Future<Item = T, Error = RpcError> + Send>;
 
-// TODO: De-duplicate
 #[derive(Debug, Deserialize)]
 pub struct Solution {
 	pub public_key: [u8; 32],
@@ -114,6 +121,8 @@ pub struct BabeRpcHandler<B: BlockT, C, SC> {
 	/// The SelectChain strategy
 	select_chain: SC,
 	manager: SubscriptionManager,
+	notification_senders: Arc<Mutex<Vec<UnboundedSender<NewSlotInfo>>>>,
+	solution_senders: Arc<Mutex<HashMap<SlotNumber, futures::channel::mpsc::Sender<Option<Solution>>>>>,
 }
 
 impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
@@ -130,12 +139,72 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 		where
 			E: Executor01<Box<dyn Future01<Item = (), Error = ()> + Send>> + Send + Sync + 'static,
 	{
+		let notification_senders: Arc<Mutex<Vec<UnboundedSender<NewSlotInfo>>>> = Arc::default();
+		let solution_senders: Arc<Mutex<HashMap<SlotNumber, futures::channel::mpsc::Sender<Option<Solution>>>>> = Arc::default();
 		std::thread::Builder::new()
 			.name("babe_rpc_nsn_handler".to_string())
-			.spawn(move || {
-				let mut new_slot_notifier = new_slot_notifier();
-				while let Ok((new_slot_info, solution_sender)) = new_slot_notifier.recv() {
-					// TODO
+			.spawn({
+				let notification_senders = Arc::clone(&notification_senders);
+				let solution_senders = Arc::clone(&solution_senders);
+				let new_slot_notifier: std::sync::mpsc::Receiver<
+					(NewSlotInfo, mpsc::SyncSender<Option<sp_consensus_babe::digests::Solution>>)
+				> = new_slot_notifier();
+
+				move || {
+					while let Ok((new_slot_info, sync_solution_sender)) = new_slot_notifier.recv() {
+						futures::executor::block_on(async {
+							let (solution_sender, mut solution_receiver) = futures::channel::mpsc::channel(0);
+							solution_senders.lock().insert(new_slot_info.slot_number, solution_sender);
+							let expected_solutions_count;
+							{
+								let mut notification_senders = notification_senders.lock();
+								expected_solutions_count = notification_senders.len();
+								if expected_solutions_count == 0 {
+									let _ = sync_solution_sender.send(None);
+									return;
+								}
+								for notification_sender in notification_senders.iter_mut() {
+									notification_sender.send(new_slot_info.clone()).await;
+								}
+							}
+
+							let timeout = futures_timer::Delay::new(SOLUTION_TIMEOUT).map(|_| None);
+							let solution = async move {
+								// TODO: This doesn't track what client sent a solution, allowing
+								//  some clients to send multiple
+								let mut potential_solutions_left = expected_solutions_count;
+								while let Some(solution) = solution_receiver.next().await {
+									if let Some(solution) = solution {
+										return Some(sp_consensus_babe::digests::Solution {
+											public_key: AuthorityId::from_slice(&solution.public_key),
+											nonce: solution.nonce,
+											encoding: solution.encoding,
+											signature: solution.signature,
+											tag: solution.tag,
+											randomness: solution.randomness,
+										});
+									}
+									potential_solutions_left -= 1;
+									if potential_solutions_left == 0 {
+										break;
+									}
+								}
+
+								return None;
+							};
+
+							let solution = match future::select(timeout, Box::pin(solution)).await {
+								Either::Left((value1, _)) => value1,
+								Either::Right((value2, _)) => value2,
+							};
+
+							if let Err(error) = sync_solution_sender.send(solution) {
+								debug!("Failed to send solution: {}", error);
+							}
+
+							solution_senders.lock().remove(&new_slot_info.slot_number);
+						});
+					}
 				}
 			})
 			.expect("Failed to spawn babe rpc new slot notifier handler");
@@ -147,6 +216,8 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 			babe_config,
 			select_chain,
 			manager,
+			notification_senders,
+			solution_senders,
 		}
 	}
 }
@@ -171,25 +242,11 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 
 	fn subscribe_slot_info(&self, _metadata: Self::Metadata, subscriber: Subscriber<NewSlotInfo>) {
 		self.manager.add(subscriber, |sink| {
-			let (mut tx, rx) = futures::channel::mpsc::unbounded::<Result<NewSlotInfo, ()>>();
-			std::thread::spawn(move || {
-				let mut slot_number: u64 = 0;
-				loop {
-					std::thread::sleep(std::time::Duration::from_secs(1));
-					if let Err(_) = futures::executor::block_on(tx.send(Ok(NewSlotInfo {
-						slot_number,
-						epoch_randomness: vec![1u8; 32]
-					}))) {
-						break;
-					}
-
-					slot_number += 1;
-				}
-			});
-
+			let (tx, rx) = futures::channel::mpsc::unbounded();
+			self.notification_senders.lock().push(tx);
 			sink
 				.sink_map_err(|e| warn!("Error sending notifications: {:?}", e))
-				.send_all(rx.compat().map(|res| Ok(res)))
+				.send_all(rx.map(Ok::<_, ()>).compat().map(|res| Ok(res)))
 				.map(|_| ())
 		});
 	}
