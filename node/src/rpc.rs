@@ -5,7 +5,7 @@
 
 #![warn(missing_docs)]
 
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 
 use node_template_runtime::{
 	opaque::Block, AccountId, Balance,
@@ -23,7 +23,6 @@ pub use sc_rpc_api::DenyUnsafe;
 use sp_transaction_pool::TransactionPool;
 use sc_client_api::ExecutorProvider;
 use sc_rpc::SubscriptionTaskExecutor;
-use sc_consensus_babe_rpc::{SlotInfo, Solution};
 
 /// Extra dependencies for BABE.
 pub struct BabeDeps {
@@ -51,9 +50,6 @@ pub struct FullDeps<C, P, SC> {
 	/// BABE specific dependencies.
 	pub babe: BabeDeps,
 }
-
-/// A IO handler that uses all Full RPC extensions.
-pub type IoHandler = jsonrpc_core::IoHandler<sc_rpc::Metadata>;
 
 /// Instantiate all Full RPC extensions.
 pub fn create_full<C, P, SC>(

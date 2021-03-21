@@ -1,6 +1,6 @@
 //! Service and ServiceFactory implementation. Specialized wrapper over substrate service.
 
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use sc_client_api::{ExecutorProvider, RemoteBackend};
 use node_template_runtime::{self, opaque::Block, RuntimeApi};
 use sc_service::{
@@ -12,8 +12,6 @@ use sp_runtime::traits::Block as BlockT;
 use sc_executor::native_executor_instance;
 pub use sc_executor::NativeExecutor;
 use sc_network::NetworkService;
-use sc_consensus_babe_rpc::{SlotInfo, Solution};
-use sc_consensus_babe::NewSlotNotifier;
 
 // Our native executor instance.
 native_executor_instance!(
@@ -158,10 +156,6 @@ pub fn new_full_base(
 			force_authoring,
 			babe_link,
 			can_author_with,
-			on_claim_slot: Box::new(|_slot_number, _epoch| {
-				// TODO: Wire this up with RPC to send challenges to workers and receive responses
-				None
-			}),
 		};
 
 		let babe = sc_consensus_babe::start_babe(babe_config)?;

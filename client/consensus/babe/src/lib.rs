@@ -125,6 +125,7 @@ use sp_api::ApiExt;
 use crate::rpc_server::RpcServer;
 use sp_consensus_babe::digests::{SpartanPreDigest, Solution};
 use std::sync::mpsc;
+use serde::{Serialize, Deserialize};
 
 mod verification;
 mod migration;
@@ -134,7 +135,15 @@ pub mod aux_schema;
 mod tests;
 mod rpc_server;
 
-pub type NewSlotNotifier = Arc<Box<dyn (Fn() -> mpsc::Receiver<(SlotInfo, mpsc::SyncSender<Option<Solution>>)>) + Send + Sync>>;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewSlotInfo {
+	pub slot_number: SlotNumber,
+	pub epoch_randomness: Vec<u8>,
+}
+
+pub type NewSlotNotifier = Arc<Box<dyn (Fn() -> std::sync::mpsc::Receiver<
+	(NewSlotInfo, mpsc::SyncSender<Option<Solution>>)
+>) + Send + Sync>>;
 
 /// BABE epoch information
 #[derive(Decode, Encode, PartialEq, Eq, Clone, Debug)]
@@ -347,9 +356,6 @@ pub struct BabeParams<B: BlockT, C, E, I, SO, SC, CAW> {
 
 	/// Checks if the current native implementation can author with a runtime at a given block.
 	pub can_author_with: CAW,
-
-	/// This callback is called when new slot arrives and there is a chance to try claim it
-	pub on_claim_slot: Box<dyn (Fn(SlotNumber, &Epoch) -> Option<PreDigest>) + Send + Sync + 'static>,
 }
 
 /// Start the babe worker.
@@ -364,7 +370,6 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	force_authoring,
 	babe_link,
 	can_author_with,
-	on_claim_slot,
 }: BabeParams<B, C, E, I, SO, SC, CAW>) -> Result<
 	BabeWorker,
 	sp_consensus::Error,
@@ -387,6 +392,8 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	let rpc_server = RpcServer::new()
 		.expect("Failed to start RPC server");
 
+	let new_slot_senders: Arc<Mutex<Vec<mpsc::SyncSender<(NewSlotInfo, mpsc::SyncSender<Option<Solution>>)>>>> = Arc::new(Mutex::new(Vec::new()));
+
 	let worker = BabeSlotWorker {
 		client: client.clone(),
 		block_import: Arc::new(Mutex::new(block_import)),
@@ -396,7 +403,40 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 		keystore,
 		epoch_changes: babe_link.epoch_changes.clone(),
 		config: config.clone(),
-		on_claim_slot,
+		on_claim_slot: Box::new({
+			let new_slot_senders = Arc::clone(&new_slot_senders);
+
+			move |slot_number, epoch| {
+				let slot_info = NewSlotInfo {
+					slot_number,
+					epoch_randomness: epoch.randomness.to_vec(),
+				};
+				let (solution_sender, solution_receiver) = mpsc::sync_channel(0);
+				{
+					// drain_filter() would be more convenient here
+					let mut new_slot_senders = new_slot_senders.lock();
+					let mut i = 0;
+					while i != new_slot_senders.len() {
+						if new_slot_senders.get_mut(i).unwrap().send((slot_info.clone(), solution_sender.clone())).is_err() {
+							new_slot_senders.remove(i);
+						} else {
+							i += 1;
+						}
+					}
+				}
+
+				while let Ok(solution) = solution_receiver.recv() {
+					if let Some(solution) = solution {
+						return Some(PreDigest::Primary(SpartanPreDigest {
+							solution,
+							slot_number
+						}));
+					}
+				}
+
+				None
+			}
+		}),
 		rpc_server,
 	};
 
@@ -419,6 +459,7 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 	);
 	Ok(BabeWorker {
 		inner: Box::pin(inner),
+		new_slot_senders,
 	})
 }
 
@@ -426,6 +467,11 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 #[must_use]
 pub struct BabeWorker {
 	inner: Pin<Box<dyn futures::Future<Output=()> + Send + 'static>>,
+	new_slot_senders: Arc<Mutex<Vec<
+		mpsc::SyncSender<
+			(NewSlotInfo, mpsc::SyncSender<Option<Solution>>)
+		>
+	>>>,
 }
 
 impl futures::Future for BabeWorker {
@@ -441,8 +487,12 @@ impl futures::Future for BabeWorker {
 
 impl BabeWorker {
 	pub fn get_new_slot_notifier(&self) -> NewSlotNotifier {
-		// TODO: Implement
-		unimplemented!()
+		let new_slot_senders = Arc::clone(&self.new_slot_senders);
+		Arc::new(Box::new(move || {
+			let (new_slot_sender, new_slot_receiver) = mpsc::sync_channel(0);
+			new_slot_senders.lock().push(new_slot_sender);
+			new_slot_receiver
+		}))
 	}
 }
 
@@ -524,7 +574,7 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 		)?;
 
 
-		let claim = (self.on_claim_slot)(slot_number, epoch.as_ref())
+		let claim: Option<PreDigest> = (self.on_claim_slot)(slot_number, epoch.as_ref())
 			// TODO remove built-in RPC server
 			.or_else(|| {
 				self.rpc_server
@@ -572,7 +622,7 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 		sp_consensus::BlockImportParams<B, I::Transaction>,
 		sp_consensus::Error> + Send + 'static>
 	{
-		let keystore = self.keystore.clone();
+		// let keystore = self.keystore.clone();
 		Box::new(move |header, header_hash, body, storage_changes, pre_digest, epoch_descriptor| {
 			// TODO: Proper signature or fix altogether
 			// sign the pre-sealed hash of the block and then
