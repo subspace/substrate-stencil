@@ -124,7 +124,7 @@ pub fn new_full_base(
 		);
 	}
 
-	let role = config.role.clone();
+	// let role = config.role.clone();
 	let force_authoring = config.force_authoring;
 	let prometheus_registry = config.prometheus_registry().cloned();
 	let telemetry_connection_sinks = sc_service::TelemetryConnectionSinks::default();

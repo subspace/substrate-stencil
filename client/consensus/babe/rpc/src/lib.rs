@@ -217,17 +217,6 @@ impl BabeApi for BabeRpcHandler {
 	}
 }
 
-/// Holds information about the `slot_number`'s that can be claimed by a given key.
-#[derive(Default, Debug, Deserialize, Serialize)]
-pub struct EpochAuthorship {
-	/// the array of primary slots that can be claimed
-	primary: Vec<u64>,
-	/// the array of secondary slots that can be claimed
-	secondary: Vec<u64>,
-	/// The array of secondary VRF slots that can be claimed.
-	secondary_vrf: Vec<u64>,
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
