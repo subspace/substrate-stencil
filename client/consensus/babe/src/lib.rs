@@ -424,6 +424,7 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 						}
 					}
 				}
+				drop(solution_sender);
 
 				while let Ok(solution) = solution_receiver.recv() {
 					if let Some(solution) = solution {

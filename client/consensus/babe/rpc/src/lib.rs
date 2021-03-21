@@ -155,7 +155,7 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 						futures::executor::block_on(async {
 							let (solution_sender, mut solution_receiver) = futures::channel::mpsc::channel(0);
 							solution_senders.lock().insert(new_slot_info.slot_number, solution_sender);
-							let expected_solutions_count;
+							let mut expected_solutions_count;
 							{
 								let mut notification_senders = notification_senders.lock();
 								expected_solutions_count = notification_senders.len();
@@ -164,7 +164,9 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 									return;
 								}
 								for notification_sender in notification_senders.iter_mut() {
-									notification_sender.send(new_slot_info.clone()).await;
+									if notification_sender.send(new_slot_info.clone()).await.is_err() {
+										expected_solutions_count -= 1;
+									}
 								}
 							}
 
