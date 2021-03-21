@@ -19,7 +19,7 @@
 //! RPC api for babe.
 
 use std::io::Write;
-use sc_consensus_babe::{Epoch, Config, SlotNumber, NewSlotNotifier};
+use sc_consensus_babe::{Epoch, Config, SlotNumber, NewSlotNotifier, NewSlotInfo};
 use futures::{FutureExt as _, TryFutureExt as _, SinkExt, TryStreamExt, compat::Compat as _};
 use jsonrpc_core::{
 	Error as RpcError,
@@ -77,12 +77,6 @@ pub struct ProposedProofOfSpaceResult {
 	solution: Option<Solution>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SlotInfo {
-	pub slot_number: SlotNumber,
-	pub epoch_randomness: Vec<u8>,
-}
-
 /// Provides rpc methods for interacting with Babe.
 #[rpc]
 pub trait BabeApi {
@@ -96,7 +90,7 @@ pub trait BabeApi {
 
 	/// Slot info subscription
 	#[pubsub(subscription = "babe_slot_info", subscribe, name = "babe_subscribeSlotInfo")]
-	fn subscribe_slot_info(&self, metadata: Self::Metadata, subscriber: Subscriber<SlotInfo>);
+	fn subscribe_slot_info(&self, metadata: Self::Metadata, subscriber: Subscriber<NewSlotInfo>);
 
 	/// Unsubscribe from slot info subscription.
 	#[pubsub(subscription = "babe_slot_info", unsubscribe, name = "babe_unsubscribeSlotInfo")]
@@ -136,6 +130,15 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 		where
 			E: Executor01<Box<dyn Future01<Item = (), Error = ()> + Send>> + Send + Sync + 'static,
 	{
+		std::thread::Builder::new()
+			.name("babe_rpc_nsn_handler".to_string())
+			.spawn(move || {
+				let mut new_slot_notifier = new_slot_notifier();
+				while let Ok((new_slot_info, solution_sender)) = new_slot_notifier.recv() {
+					// TODO
+				}
+			})
+			.expect("Failed to spawn babe rpc new slot notifier handler");
 		let manager = SubscriptionManager::new(Arc::new(executor));
 		Self {
 			client,
@@ -166,72 +169,34 @@ impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
 		Box::new(future.compat())
 	}
 
-	fn subscribe_slot_info(&self, _metadata: Self::Metadata, subscriber: Subscriber<SlotInfo>) {
-		subscribe_slot_info(
-			&self.client,
-			&self.manager,
-			subscriber,
-			|| {
-				let (mut tx, rx) = futures::channel::mpsc::unbounded::<Result<SlotInfo, ()>>();
-				std::thread::spawn(move || {
-					let mut slot_number: u64 = 0;
-					loop {
-						std::thread::sleep(std::time::Duration::from_secs(1));
-						if let Err(_) = futures::executor::block_on(tx.send(Ok(SlotInfo {
-							slot_number,
-							epoch_randomness: {
-								// let bytes = slot_number.to_le_bytes();
-								// let mut epoch_randomness = vec![0u8, 32];
-								// {
-								// 	println!("mid {}", 32 - bytes.len());
-								// 	let (_, mut last) = epoch_randomness.split_at_mut(32 - bytes.len());
-								// 	last.write_all(&bytes).unwrap();
-								// }
-								// epoch_randomness
-								vec![1u8; 32]
-							}
-						}))) {
-							break;
-						}
-
-						slot_number += 1;
+	fn subscribe_slot_info(&self, _metadata: Self::Metadata, subscriber: Subscriber<NewSlotInfo>) {
+		self.manager.add(subscriber, |sink| {
+			let (mut tx, rx) = futures::channel::mpsc::unbounded::<Result<NewSlotInfo, ()>>();
+			std::thread::spawn(move || {
+				let mut slot_number: u64 = 0;
+				loop {
+					std::thread::sleep(std::time::Duration::from_secs(1));
+					if let Err(_) = futures::executor::block_on(tx.send(Ok(NewSlotInfo {
+						slot_number,
+						epoch_randomness: vec![1u8; 32]
+					}))) {
+						break;
 					}
-				});
 
-				rx.compat()
-			},
-		)
+					slot_number += 1;
+				}
+			});
+
+			sink
+				.sink_map_err(|e| warn!("Error sending notifications: {:?}", e))
+				.send_all(rx.compat().map(|res| Ok(res)))
+				.map(|_| ())
+		});
 	}
 
 	fn unsubscribe_slot_info(&self, _metadata: Option<Self::Metadata>, id: SubscriptionId) -> RpcResult<bool> {
 		Ok(self.manager.cancel(id))
 	}
-}
-
-/// Subscribe to new headers.
-fn subscribe_slot_info<Block, Client, F, S, ERR>(
-	client: &Arc<Client>,
-	subscriptions: &SubscriptionManager,
-	subscriber: Subscriber<SlotInfo>,
-	stream: F,
-) where
-	Block: BlockT + 'static,
-	Client: HeaderBackend<Block> + 'static,
-	F: FnOnce() -> S,
-	ERR: ::std::fmt::Debug,
-	S: Stream<Item=SlotInfo, Error=ERR> + Send + 'static,
-{
-	subscriptions.add(subscriber, |sink| {
-		// send further subscriptions
-		let stream = stream()
-			.map(|res| Ok(res))
-			.map_err(|e| warn!("Block notification stream error: {:?}", e));
-
-		sink
-			.sink_map_err(|e| warn!("Error sending notifications: {:?}", e))
-			.send_all(stream)
-			.map(|_| ())
-	});
 }
 
 /// Holds information about the `slot_number`'s that can be claimed by a given key.
@@ -243,25 +208,6 @@ pub struct EpochAuthorship {
 	secondary: Vec<u64>,
 	/// The array of secondary VRF slots that can be claimed.
 	secondary_vrf: Vec<u64>,
-}
-
-/// Errors encountered by the RPC
-#[derive(Debug, derive_more::Display, derive_more::From)]
-pub enum Error {
-	/// Consensus error
-	Consensus(ConsensusError),
-	/// Errors that can be formatted as a String
-	StringError(String)
-}
-
-impl From<Error> for jsonrpc_core::Error {
-	fn from(error: Error) -> Self {
-		jsonrpc_core::Error {
-			message: format!("{}", error),
-			code: jsonrpc_core::ErrorCode::ServerError(1234),
-			data: None,
-		}
-	}
 }
 
 #[cfg(test)]
