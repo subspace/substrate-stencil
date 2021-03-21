@@ -18,15 +18,13 @@
 
 //! RPC api for babe.
 
-use std::io::Write;
-use sc_consensus_babe::{Epoch, Config, SlotNumber, NewSlotNotifier, NewSlotInfo};
-use futures::{FutureExt as _, TryFutureExt as _, SinkExt, TryStreamExt, compat::Compat as _, StreamExt};
+use sc_consensus_babe::{SlotNumber, NewSlotNotifier, NewSlotInfo};
+use futures::{FutureExt as _, TryFutureExt as _, SinkExt, TryStreamExt, StreamExt};
 use jsonrpc_core::{
 	Error as RpcError,
 	futures::future as rpc_future,
 	Result as RpcResult,
 	futures::{
-		stream,
 		Future,
 		Sink,
 		Stream,
@@ -36,30 +34,14 @@ use jsonrpc_core::{
 };
 use jsonrpc_derive::rpc;
 use jsonrpc_pubsub::{typed::Subscriber, SubscriptionId, manager::SubscriptionManager};
-use sc_consensus_epochs::{descendent_query, Epoch as EpochT, SharedEpochChanges};
-use sp_consensus_babe::{
-	AuthorityId,
-	BabeApi as BabeRuntimeApi,
-	digests::PreDigest,
-};
+use sp_consensus_babe::AuthorityId;
 use serde::{Deserialize, Serialize};
-use sp_core::{
-	crypto::Public,
-	traits::BareCryptoStore,
-};
-use sp_application_crypto::AppKey;
-use sc_keystore::KeyStorePtr;
-use sc_rpc_api::DenyUnsafe;
-use sp_api::{ProvideRuntimeApi, BlockId};
-use sp_runtime::traits::{Block as BlockT, Header as _};
-use sp_consensus::{SelectChain, Error as ConsensusError};
-use sp_blockchain::{HeaderBackend, HeaderMetadata, Error as BlockChainError};
+use sp_core::crypto::Public;
 use std::{collections::HashMap, sync::Arc};
 use log::{debug, warn};
 use std::sync::mpsc;
 use parking_lot::Mutex;
 use futures::channel::mpsc::UnboundedSender;
-use futures::channel::oneshot;
 use futures::future;
 use futures::future::Either;
 use std::time::Duration;
@@ -109,30 +91,15 @@ pub trait BabeApi {
 }
 
 /// Implements the BabeRpc trait for interacting with Babe.
-pub struct BabeRpcHandler<B: BlockT, C, SC> {
-	/// shared reference to the client.
-	client: Arc<C>,
-	/// shared reference to EpochChanges
-	shared_epoch_changes: SharedEpochChanges<B, Epoch>,
-	/// shared reference to the Keystore
-	keystore: KeyStorePtr,
-	/// config (actually holds the slot duration)
-	babe_config: Config,
-	/// The SelectChain strategy
-	select_chain: SC,
+pub struct BabeRpcHandler {
 	manager: SubscriptionManager,
 	notification_senders: Arc<Mutex<Vec<UnboundedSender<NewSlotInfo>>>>,
 	solution_senders: Arc<Mutex<HashMap<SlotNumber, futures::channel::mpsc::Sender<Option<Solution>>>>>,
 }
 
-impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
+impl BabeRpcHandler {
 	/// Creates a new instance of the BabeRpc handler.
 	pub fn new<E>(
-		client: Arc<C>,
-		shared_epoch_changes: SharedEpochChanges<B, Epoch>,
-		keystore: KeyStorePtr,
-		babe_config: Config,
-		select_chain: SC,
 		executor: E,
 		new_slot_notifier: NewSlotNotifier,
 	) -> Self
@@ -212,11 +179,6 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 			.expect("Failed to spawn babe rpc new slot notifier handler");
 		let manager = SubscriptionManager::new(Arc::new(executor));
 		Self {
-			client,
-			shared_epoch_changes,
-			keystore,
-			babe_config,
-			select_chain,
 			manager,
 			notification_senders,
 			solution_senders,
@@ -224,13 +186,7 @@ impl<B: BlockT, C, SC> BabeRpcHandler<B, C, SC> {
 	}
 }
 
-impl<B, C, SC> BabeApi for BabeRpcHandler<B, C, SC>
-	where
-		B: BlockT,
-		C: ProvideRuntimeApi<B> + HeaderBackend<B> + HeaderMetadata<B, Error=BlockChainError> + 'static,
-		C::Api: BabeRuntimeApi<B>,
-		SC: SelectChain<B> + Clone + 'static,
-{
+impl BabeApi for BabeRpcHandler {
 	type Metadata = sc_rpc_api::Metadata;
 
 	fn propose_proof_of_space(&self, proposed_proof_of_space_result: ProposedProofOfSpaceResult) -> FutureResult<()> {

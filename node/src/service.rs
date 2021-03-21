@@ -146,7 +146,6 @@ pub fn new_full_base(
 			sp_consensus::CanAuthorWithNativeVersion::new(client.executor().clone());
 
 		let babe_config = sc_consensus_babe::BabeParams {
-			keystore: keystore.clone(),
 			client: client.clone(),
 			select_chain: select_chain.clone(),
 			env: proposer,
@@ -164,25 +163,15 @@ pub fn new_full_base(
 	// }
 
 	let (rpc_extensions_builder,) = {
-		let (_, babe_link) = &import_setup;
-
-		let babe_config = babe_link.config().clone();
-		let shared_epoch_changes = babe_link.epoch_changes().clone();
-
 		let client = client.clone();
 		let pool = transaction_pool.clone();
-		let keystore = keystore.clone();
 
 		let rpc_extensions_builder = move |deny_unsafe, subscription_executor| {
 			let deps = crate::rpc::FullDeps {
 				client: client.clone(),
 				pool: pool.clone(),
-				select_chain: select_chain.clone(),
 				deny_unsafe,
 				babe: crate::rpc::BabeDeps {
-					babe_config: babe_config.clone(),
-					shared_epoch_changes: shared_epoch_changes.clone(),
-					keystore: keystore.clone(),
 					subscription_executor,
 					new_slot_notifier: Arc::clone(&new_slot_notifier),
 				},

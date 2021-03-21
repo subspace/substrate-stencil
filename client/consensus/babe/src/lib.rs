@@ -76,20 +76,18 @@ pub use sp_consensus_babe::{
 pub use sp_consensus::SyncOracle;
 use std::{
 	collections::HashMap, sync::Arc, u64, pin::Pin, time::{Instant, Duration},
-	any::Any, borrow::Cow, convert::TryInto,
+	any::Any, borrow::Cow,
 };
 use sp_consensus::{ImportResult, CanAuthorWith};
 use sp_consensus::import_queue::{
 	BoxJustificationImport, BoxFinalityProofImport,
 };
-use sp_core::{crypto::Public, traits::BareCryptoStore};
-use sp_application_crypto::AppKey;
+use sp_core::{crypto::Public};
 use sp_runtime::{
 	generic::{BlockId, OpaqueDigestItemId}, Justification,
 	traits::{Block as BlockT, Header, DigestItemFor, Zero},
 };
 use sp_api::{ProvideRuntimeApi, NumberFor};
-use sc_keystore::KeyStorePtr;
 use parking_lot::Mutex;
 use sp_inherents::{InherentDataProviders, InherentData};
 use sc_telemetry::{telemetry, CONSENSUS_TRACE, CONSENSUS_DEBUG};
@@ -122,7 +120,6 @@ use sp_blockchain::{
 };
 use codec::{Encode, Decode};
 use sp_api::ApiExt;
-use crate::rpc_server::RpcServer;
 use sp_consensus_babe::digests::{SpartanPreDigest, Solution};
 use std::sync::mpsc;
 use serde::{Serialize, Deserialize};
@@ -133,14 +130,17 @@ mod migration;
 pub mod aux_schema;
 #[cfg(test)]
 mod tests;
-mod rpc_server;
 
+/// Information about new slot that just arrived
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewSlotInfo {
+	/// Slot number
 	pub slot_number: SlotNumber,
+	/// Epoch randomness
 	pub epoch_randomness: Vec<u8>,
 }
 
+/// A function that can be called whenever it is necessary to create a subscription for new slots
 pub type NewSlotNotifier = Arc<Box<dyn (Fn() -> std::sync::mpsc::Receiver<
 	(NewSlotInfo, mpsc::SyncSender<Option<Solution>>)
 >) + Send + Sync>>;
@@ -325,9 +325,6 @@ impl std::ops::Deref for Config {
 
 /// Parameters for BABE.
 pub struct BabeParams<B: BlockT, C, E, I, SO, SC, CAW> {
-	/// The keystore that manages the keys of the node.
-	pub keystore: KeyStorePtr,
-
 	/// The client to use
 	pub client: Arc<C>,
 
@@ -360,7 +357,6 @@ pub struct BabeParams<B: BlockT, C, E, I, SO, SC, CAW> {
 
 /// Start the babe worker.
 pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
-	keystore,
 	client,
 	select_chain,
 	env,
@@ -389,9 +385,6 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 {
 	let config = babe_link.config;
 
-	let rpc_server = RpcServer::new()
-		.expect("Failed to start RPC server");
-
 	let new_slot_senders: Arc<Mutex<Vec<mpsc::SyncSender<(NewSlotInfo, mpsc::SyncSender<Option<Solution>>)>>>> = Arc::default();
 
 	let worker = BabeSlotWorker {
@@ -400,7 +393,6 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 		env,
 		sync_oracle: sync_oracle.clone(),
 		force_authoring,
-		keystore,
 		epoch_changes: babe_link.epoch_changes.clone(),
 		config: config.clone(),
 		on_claim_slot: Box::new({
@@ -438,7 +430,6 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 				None
 			}
 		}),
-		rpc_server,
 	};
 
 	register_babe_inherent_data_provider(&inherent_data_providers, config.slot_duration())?;
@@ -487,6 +478,8 @@ impl futures::Future for BabeWorker {
 }
 
 impl BabeWorker {
+	/// Returns a function that can be called whenever it is necessary to create a subscription for
+	/// new slots
 	pub fn get_new_slot_notifier(&self) -> NewSlotNotifier {
 		let new_slot_senders = Arc::clone(&self.new_slot_senders);
 		Arc::new(Box::new(move || {
@@ -503,11 +496,9 @@ struct BabeSlotWorker<B: BlockT, C, E, I, SO> {
 	env: E,
 	sync_oracle: SO,
 	force_authoring: bool,
-	keystore: KeyStorePtr,
 	epoch_changes: SharedEpochChanges<B, Epoch>,
 	config: Config,
 	on_claim_slot: Box<dyn (Fn(SlotNumber, &Epoch) -> Option<PreDigest>) + Send + Sync + 'static>,
-	rpc_server: RpcServer,
 }
 
 impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlotWorker<B, C, E, I, SO> where
@@ -575,25 +566,7 @@ impl<B, C, E, I, Error, SO> sc_consensus_slots::SimpleSlotWorker<B> for BabeSlot
 		)?;
 
 
-		let claim: Option<PreDigest> = (self.on_claim_slot)(slot_number, epoch.as_ref())
-			// TODO remove built-in RPC server
-			.or_else(|| {
-				self.rpc_server
-					.notify_new_slot(slot_number, epoch.as_ref())
-					.map(|solution| {
-						PreDigest::Primary(SpartanPreDigest {
-							solution: Solution {
-								public_key: AuthorityId::from_slice(&solution.public_key),
-								nonce: solution.nonce,
-								encoding: solution.encoding,
-								signature: solution.signature,
-								tag: solution.tag,
-								randomness: solution.randomness
-							},
-							slot_number
-						})
-					})
-			});
+		let claim: Option<PreDigest> = (self.on_claim_slot)(slot_number, epoch.as_ref());
 
 		if claim.is_some() {
 			debug!(target: "babe", "Claimed slot {}", slot_number);
@@ -1549,7 +1522,6 @@ pub mod test_helpers {
 		authorship::claim_slot(
 			slot_number,
 			&epoch,
-			keystore,
 		).map(|(digest, _)| digest)
 	}
 }
