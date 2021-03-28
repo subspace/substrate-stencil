@@ -123,6 +123,8 @@ use sp_api::ApiExt;
 use sp_consensus_babe::digests::{SpartanPreDigest, Solution};
 use std::sync::mpsc;
 use serde::{Serialize, Deserialize};
+use ring::digest;
+use std::convert::TryInto;
 
 mod verification;
 mod migration;
@@ -136,8 +138,10 @@ mod tests;
 pub struct NewSlotInfo {
 	/// Slot number
 	pub slot_number: SlotNumber,
-	/// Epoch randomness
-	pub epoch_randomness: Vec<u8>,
+	/// Slot challenge
+	pub challenge: [u8; 8],
+	/// Acceptable solution range
+	pub solution_range: u64,
 }
 
 /// A function that can be called whenever it is necessary to create a subscription for new slots
@@ -401,7 +405,14 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 			move |slot_number, epoch| {
 				let slot_info = NewSlotInfo {
 					slot_number,
-					epoch_randomness: epoch.randomness.to_vec(),
+					challenge: digest::digest(&digest::SHA256, &{
+						let mut data = Vec::with_capacity(epoch.randomness.len() + std::mem::size_of::<SlotNumber>());
+						data.extend_from_slice(&epoch.randomness);
+						data.extend_from_slice( &slot_number.to_le_bytes());
+						data
+					}).as_ref()[..8].try_into().unwrap(),
+					// TODO: Real solution range
+					solution_range: u64::MAX / 4096
 				};
 				let (solution_sender, solution_receiver) = mpsc::sync_channel(0);
 				{

@@ -51,6 +51,7 @@ merlin = "2.0"
 pdqselect = "0.1.0"
 derive_more = "0.99.2"
 retain_mut = "0.1.1"
+ring = "0.16.20"
 
 jsonrpc-core = "17.0.0"
 jsonrpc-derive = "17.0.0"

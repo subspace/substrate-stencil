@@ -546,7 +546,10 @@ impl<T: Trait> Module<T> {
 			CurrentSlot::put(current_slot);
 
 			if let PreDigest::Primary(primary) = digest {
-				Some(primary.solution.tag)
+				// TODO: Fix this, this is most likely not right, came up with this so it compiles
+				let mut randomness = [0u8; 32];
+				randomness.as_mut()[..8].copy_from_slice(&primary.solution.tag);
+				Some(randomness)
 			} else {
 				None
 			}

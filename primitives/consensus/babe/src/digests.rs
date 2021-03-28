@@ -44,11 +44,10 @@ pub struct PrimaryPreDigest {
 #[derive(Clone, RuntimeDebug, Encode, Decode)]
 pub struct Solution {
 	pub public_key: AuthorityId,
-	pub nonce: u32,
+	pub nonce: u64,
 	pub encoding: Vec<u8>,
-	pub signature: [u8; 32],
-	pub tag: [u8; 32],
-	pub randomness: Vec<u8>,
+	pub signature: Vec<u8>,
+	pub tag: [u8; 8],
 }
 
 /// Raw BABE primary slot assignment pre-digest.
