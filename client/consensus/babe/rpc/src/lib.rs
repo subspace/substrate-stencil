@@ -53,11 +53,10 @@ type FutureResult<T> = Box<dyn rpc_future::Future<Item = T, Error = RpcError> + 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Solution {
 	pub public_key: [u8; 32],
-	pub nonce: u32,
+	pub nonce: u64,
 	pub encoding: Vec<u8>,
-	pub signature: [u8; 32],
-	pub tag: [u8; 32],
-	pub randomness: Vec<u8>,
+	pub signature: Vec<u8>,
+	pub tag: [u8; 8],
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,7 +71,6 @@ pub trait BabeApi {
 	/// RPC metadata
 	type Metadata;
 
-	// TODO: Add ProposedProofOfSpaceResult as a parameter here
 	#[rpc(name = "babe_proposeProofOfSpace")]
 	fn propose_proof_of_space(&self, proposed_proof_of_space_result: ProposedProofOfSpaceResult) -> FutureResult<()>;
 
@@ -150,7 +148,6 @@ impl BabeRpcHandler {
 											encoding: solution.encoding,
 											signature: solution.signature,
 											tag: solution.tag,
-											randomness: solution.randomness,
 										});
 									}
 									potential_solutions_left -= 1;
