@@ -19,13 +19,10 @@ use sp_runtime::{
 use sp_runtime::curve::PiecewiseLinear;
 use pallet_session::{historical as pallet_session_historical};
 use sp_runtime::traits::{
-	BlakeTwo256, Block as BlockT, IdentityLookup, Verify, IdentifyAccount, NumberFor, Saturating,
+	BlakeTwo256, Block as BlockT, IdentityLookup, Verify, IdentifyAccount, Saturating,
 	Convert, OpaqueKeys,
 };
 use sp_api::impl_runtime_apis;
-use pallet_grandpa::{AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList};
-use pallet_grandpa::fg_primitives;
-use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use sp_version::RuntimeVersion;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
@@ -129,8 +126,7 @@ pub mod opaque {
 	impl_opaque_keys! {
 		pub struct SessionKeys {
 			pub babe: Babe,
-			pub grandpa: Grandpa,
-			pub im_online: ImOnline,
+			// pub im_online: ImOnline,
 		}
 	}
 }
@@ -201,30 +197,30 @@ impl Filter<Call> for BaseFilter {
 	}
 }
 
-pub struct Author;
-impl OnUnbalanced<NegativeImbalance> for Author {
-	fn on_nonzero_unbalanced(amount: NegativeImbalance) {
-		Balances::resolve_creating(&Authorship::author(), amount);
-	}
-}
-
-type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
-
-pub struct DealWithFees;
-impl OnUnbalanced<NegativeImbalance> for DealWithFees {
-	fn on_unbalanceds<B>(mut fees_then_tips: impl Iterator<Item=NegativeImbalance>) {
-		if let Some(fees) = fees_then_tips.next() {
-			// for fees, 80% to treasury, 20% to author
-			let mut split = fees.ration(80, 20);
-			if let Some(tips) = fees_then_tips.next() {
-				// for tips, if any, 80% to treasury, 20% to author (though this can be anything)
-				tips.ration_merge_into(80, 20, &mut split);
-			}
-			Treasury::on_unbalanced(split.0);
-			Author::on_unbalanced(split.1);
-		}
-	}
-}
+// pub struct Author;
+// impl OnUnbalanced<NegativeImbalance> for Author {
+// 	fn on_nonzero_unbalanced(amount: NegativeImbalance) {
+// 		Balances::resolve_creating(&Authorship::author(), amount);
+// 	}
+// }
+//
+// type NegativeImbalance = <Balances as Currency<AccountId>>::NegativeImbalance;
+//
+// pub struct DealWithFees;
+// impl OnUnbalanced<NegativeImbalance> for DealWithFees {
+// 	fn on_unbalanceds<B>(mut fees_then_tips: impl Iterator<Item=NegativeImbalance>) {
+// 		if let Some(fees) = fees_then_tips.next() {
+// 			// for fees, 80% to treasury, 20% to author
+// 			let mut split = fees.ration(80, 20);
+// 			if let Some(tips) = fees_then_tips.next() {
+// 				// for tips, if any, 80% to treasury, 20% to author (though this can be anything)
+// 				tips.ration_merge_into(80, 20, &mut split);
+// 			}
+// 			Treasury::on_unbalanced(split.0);
+// 			Author::on_unbalanced(split.1);
+// 		}
+// 	}
+// }
 
 parameter_types! {
 	pub const BlockHashCount: BlockNumber = 2400;
@@ -323,27 +319,7 @@ impl pallet_babe::Trait for Runtime {
 	)>>::IdentificationTuple;
 
 	type HandleEquivocation =
-		pallet_babe::EquivocationHandler<Self::KeyOwnerIdentification, Offences>;
-
-	type WeightInfo = ();
-}
-
-impl pallet_grandpa::Trait for Runtime {
-	type Event = Event;
-	type Call = Call;
-
-	type KeyOwnerProofSystem = Historical;
-
-	type KeyOwnerProof =
-		<Self::KeyOwnerProofSystem as KeyOwnerProofSystem<(KeyTypeId, GrandpaId)>>::Proof;
-
-	type KeyOwnerIdentification = <Self::KeyOwnerProofSystem as KeyOwnerProofSystem<(
-		KeyTypeId,
-		GrandpaId,
-	)>>::IdentificationTuple;
-
-	type HandleEquivocation = 
-		pallet_grandpa::EquivocationHandler<Self::KeyOwnerIdentification, Offences>;
+		pallet_babe::EquivocationHandler<Self::KeyOwnerIdentification>;
 
 	type WeightInfo = ();
 }
@@ -453,7 +429,7 @@ impl pallet_staking::Trait for Runtime {
 	type CurrencyToVote = CurrencyToVoteHandler;
 	type RewardRemainder = Treasury;
 	type Event = Event;
-	type Slash = Treasury; 
+	type Slash = Treasury;
 	type Reward = (); // rewards are minted from the void
 	type SessionsPerEra = SessionsPerEra;
 	type BondingDuration = BondingDuration;
@@ -480,12 +456,12 @@ parameter_types! {
 	pub const UncleGenerations: BlockNumber = 5;
 }
 
-impl pallet_authorship::Trait for Runtime {
-	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Babe>;
-	type UncleGenerations = UncleGenerations;
-	type FilterUncle = ();
-	type EventHandler = (Staking, ImOnline);
-}
+// impl pallet_authorship::Trait for Runtime {
+// 	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Babe>;
+// 	type UncleGenerations = UncleGenerations;
+// 	type FilterUncle = ();
+// 	type EventHandler = (Staking, ImOnline);
+// }
 
 impl pallet_utility::Trait for Runtime {
 	type Event = Event;
@@ -497,26 +473,26 @@ parameter_types! {
 	pub OffencesWeightSoftLimit: Weight = Perbill::from_percent(60) * MaximumBlockWeight::get();
 }
 
-impl pallet_offences::Trait for Runtime {
-	type Event = Event;
-	type IdentificationTuple = pallet_session::historical::IdentificationTuple<Self>;
-	type OnOffenceHandler = Staking;
-	type WeightSoftLimit = OffencesWeightSoftLimit;
-}
+// impl pallet_offences::Trait for Runtime {
+// 	type Event = Event;
+// 	type IdentificationTuple = pallet_session::historical::IdentificationTuple<Self>;
+// 	type OnOffenceHandler = Staking;
+// 	type WeightSoftLimit = OffencesWeightSoftLimit;
+// }
 
 parameter_types! {
 	pub const SessionDuration: BlockNumber = EPOCH_DURATION_IN_SLOTS as _;
 	pub const ImOnlineUnsignedPriority: TransactionPriority = TransactionPriority::max_value();
 }
 
-impl pallet_im_online::Trait for Runtime {
-	type AuthorityId = ImOnlineId;
-	type Event = Event;
-	type SessionDuration = SessionDuration;
-	type ReportUnresponsiveness = Offences;
-	type UnsignedPriority = ImOnlineUnsignedPriority;
-	type WeightInfo = ();
-}
+// impl pallet_im_online::Trait for Runtime {
+// 	type AuthorityId = ImOnlineId;
+// 	type Event = Event;
+// 	type SessionDuration = SessionDuration;
+// 	type ReportUnresponsiveness = Offences;
+// 	type UnsignedPriority = ImOnlineUnsignedPriority;
+// 	type WeightInfo = ();
+// }
 
 parameter_types! {
 	pub const ProposalBond: Permill = Permill::from_percent(5);
@@ -735,17 +711,16 @@ construct_runtime!(
 		RandomnessCollectiveFlip: pallet_randomness_collective_flip::{Module, Call, Storage},
 		Timestamp: pallet_timestamp::{Module, Call, Storage, Inherent},
 		Babe: pallet_babe::{Module, Call, Storage, Config, Inherent},
-		Grandpa: pallet_grandpa::{Module, Call, Storage, Config, Event},
-		ImOnline: pallet_im_online::{Module, Call, Storage, Event<T>, ValidateUnsigned, Config<T>},
+		// ImOnline: pallet_im_online::{Module, Call, Storage, Event<T>, ValidateUnsigned, Config<T>},
 		Balances: pallet_balances::{Module, Call, Storage, Config<T>, Event<T>},
 		TransactionPayment: pallet_transaction_payment::{Module, Storage},
 		Staking: pallet_staking::{Module, Call, Config<T>, Storage, Event<T>, ValidateUnsigned},
-		Authorship: pallet_authorship::{Module, Call, Storage, Inherent},
+		// Authorship: pallet_authorship::{Module, Call, Storage, Inherent},
 		Session: pallet_session::{Module, Call, Storage, Event, Config<T>},
 		Historical: pallet_session_historical::{Module},
 		Sudo: pallet_sudo::{Module, Call, Config<T>, Storage, Event<T>},
 		Utility: pallet_utility::{Module, Call, Event},
-		Offences: pallet_offences::{Module, Call, Storage, Event},
+		// Offences: pallet_offences::{Module, Call, Storage, Event},
 		Treasury: pallet_treasury::{Module, Call, Storage, Config, Event<T>},
 		Council: pallet_collective::<Instance1>::{Module, Call, Storage, Origin<T>, Event<T>, Config<T>},
 		Elections: pallet_elections_phragmen::{Module, Call, Storage, Event<T>, Config<T>},
@@ -865,7 +840,6 @@ impl_runtime_apis! {
 				c: PRIMARY_PROBABILITY,
 				genesis_authorities: Babe::authorities(),
 				randomness: Babe::randomness(),
-				allowed_slots: sp_consensus_babe::AllowedSlots::PrimaryAndSecondaryPlainSlots,
 			}
 		}
 
@@ -906,38 +880,6 @@ impl_runtime_apis! {
 			encoded: Vec<u8>,
 		) -> Option<Vec<(Vec<u8>, KeyTypeId)>> {
 			opaque::SessionKeys::decode_into_raw_public_keys(&encoded)
-		}
-	}
-
-	impl fg_primitives::GrandpaApi<Block> for Runtime {
-		fn grandpa_authorities() -> GrandpaAuthorityList {
-			Grandpa::grandpa_authorities()
-		}
-
-		fn submit_report_equivocation_unsigned_extrinsic(
-			equivocation_proof: fg_primitives::EquivocationProof<
-				<Block as BlockT>::Hash,
-				NumberFor<Block>,
-			>,
-			key_owner_proof: fg_primitives::OpaqueKeyOwnershipProof,
-		) -> Option<()> {
-			let key_owner_proof = key_owner_proof.decode()?;
-
-			Grandpa::submit_unsigned_equivocation_report(
-				equivocation_proof,
-				key_owner_proof,
-			)
-		}
-
-		fn generate_key_ownership_proof(
-			_set_id: fg_primitives::SetId,
-			authority_id: GrandpaId,
-		) -> Option<fg_primitives::OpaqueKeyOwnershipProof> {
-			use codec::Encode;
-
-			Historical::prove((fg_primitives::KEY_TYPE, authority_id))
-				.map(|p| p.encode())
-				.map(fg_primitives::OpaqueKeyOwnershipProof::new)
 		}
 	}
 

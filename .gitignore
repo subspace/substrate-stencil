@@ -14,3 +14,5 @@
 
 # Flag file that show extracts successfully
 .cargo-ok
+
+/.idea
