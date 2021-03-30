@@ -1,8 +1,8 @@
 <div align="center">
 
-  <h1><code>substrate-stencil</code></h1>
+  <h1><code>substrate-spartan</code></h1>
 
-  <strong>A template for kick starting a Rust and Blockchain project using <a href="https://github.com/paritytech/substrate">Substrate</a>.</strong>
+  <strong>A proof-of-concept for the <a href="https://subspace.network/">Subspace Network Blockchain</a> forked from the substrate-stencil template using <a href="https://github.com/paritytech/substrate">Substrate</a>.</strong>
 
   <h3>
     <a href="https://substrate.dev/">Docs</a>
@@ -12,7 +12,41 @@
 
 </div>
 
-## Features
+## Overview
+
+Subspace is a proof-of-storage blockchain that resolves the farmer's dilemma, to learn more read our <a href="https://drive.google.com/file/d/1v847u_XeVf0SBz7Y7LEMXi72QfqirstL/view">white paper</a>. 
+
+This is an inital implemenation, intended to demonstrate the feasability of retrofitting Babe's proof-of-stake block production mechanism with a proof-of-space variant. Since Babe and Subspace share the same notion of timeslots and epochs presented in Ourobouros Praos, we decided it would be easier to fork Babe than to start over from scratch with a new Substrate pallet. Instead of implementing the full Subspace proof-of-replication of the blockchain history, this only implements a simpler proof-of-space (Spartan) based on the same underlying Sloth permutation.
+
+Key Changes Include
+* We have removed Grandpa, this will later be replaced with a permissionless finality gadget.
+* We have ripped out everything to do with the VRF and authorities for Babe.
+* `slot_notifications` are now hooked into the RPC, such that anyone may subscribe over websockets. 
+* We assume some secondary client (<a href="https://www.github.com/subspace/spartan-farmer">spartan-farmer</a>) has subscribed to these notifications.
+* When a new slot arrives, the epoch randomness and slot number are published over the RPC.
+* The farmer will search its plot for a solution which satisfies the challenge, returning a `Solution` Option
+* If the farmer returns a valid `Solution` the client will produce a new block
+* Effectively, the VRF evalaution is now done over the RPC, replacing a stake-weighted election with a space-weighted election.
+
+**Notes:** The code is un-audited and not production ready, use it at your own risk.
+
+## Usage
+
+1. Install the farmer and create a plot.
+2. Install this client and spin up a new node.
+3. Run the farmer, it will connect to this client.
+4. Sit back and watch the magic...
+
+```
+$ git clone https://github.com/subspace/substrate-stencil.git
+$ cd substrate-stencil
+$ cargo build
+$ cargo run -- -dev -tmp
+
+```
+
+
+## Original Substrate-Stencil Features
 
 This template includes the minimum required components to start a PoS testnet, inspired by [substrate-node-template](https://github.com/substrate-developer-hub/substrate-node-template).
 
@@ -20,9 +54,8 @@ This template includes the minimum required components to start a PoS testnet, i
 * Staking related pallets: staking, session, authorship, im-online, offences, utility
 * Governance related pallets: collective, membership, elections-phragmen, democracy, treasure
 
-**Notes:** The code is un-audited and not production ready, use it at your own risk.
 
-## 🚴 Usage
+## 🚴 Original Substrate Stencial Usage
 
 ### 📦 Installation
 
