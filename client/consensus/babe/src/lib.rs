@@ -133,6 +133,21 @@ pub mod aux_schema;
 #[cfg(test)]
 mod tests;
 
+// TODO: Real adjustable solution range
+const SOLUTION_RANGE: u64 = u64::MAX / 4096;
+// TODO: These should not be hardcoded
+const PRIME_SIZE_BYTES: usize = 8;
+const PIECE_SIZE: usize = 4096;
+const GENESIS_PIECE_SEED: &str = "hello";
+const ENCODE_ROUNDS: usize = 1;
+// TODO: Replace fixed salt with something
+const SALT: Salt = [1u8; 32];
+const SIGNING_CONTEXT: &[u8] = b"FARMER";
+
+type Piece = [u8; PIECE_SIZE];
+type Salt = [u8; 32];
+type Tag = [u8; PRIME_SIZE_BYTES];
+
 /// Information about new slot that just arrived
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewSlotInfo {
@@ -405,14 +420,8 @@ pub fn start_babe<'a, B, C, SC, E, I, SO, CAW, Error>(BabeParams {
 			move |slot_number, epoch| {
 				let slot_info = NewSlotInfo {
 					slot_number,
-					challenge: digest::digest(&digest::SHA256, &{
-						let mut data = Vec::with_capacity(epoch.randomness.len() + std::mem::size_of::<SlotNumber>());
-						data.extend_from_slice(&epoch.randomness);
-						data.extend_from_slice( &slot_number.to_le_bytes());
-						data
-					}).as_ref()[..8].try_into().unwrap(),
-					// TODO: Real solution range
-					solution_range: u64::MAX / 4096
+					challenge: create_challenge(epoch, slot_number),
+					solution_range: SOLUTION_RANGE
 				};
 				let (solution_sender, solution_receiver) = mpsc::sync_channel(0);
 				{
@@ -1498,6 +1507,15 @@ pub fn import_queue<Block: BlockT, Client, SelectChain, Inner, CAW>(
 		spawner,
 		registry,
 	))
+}
+
+pub(crate) fn create_challenge(epoch: &Epoch, slot_number: SlotNumber) -> [u8; 8] {
+	digest::digest(&digest::SHA256, &{
+		let mut data = Vec::with_capacity(epoch.randomness.len() + std::mem::size_of::<SlotNumber>());
+		data.extend_from_slice(&epoch.randomness);
+		data.extend_from_slice( &slot_number.to_le_bytes());
+		data
+	}).as_ref()[..8].try_into().unwrap()
 }
 
 /// BABE test helpers. Utility methods for manually authoring blocks.
