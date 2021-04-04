@@ -194,13 +194,13 @@ fn is_encoding_valid(solution: &Solution) -> bool {
 	// TODO: This should not be created on each verification
 	let spartan: Spartan<PRIME_SIZE_BYTES, PIECE_SIZE> =
 		Spartan::<PRIME_SIZE_BYTES, PIECE_SIZE>::new(genesis_piece_from_seed(GENESIS_PIECE_SEED));
-	let piece = match solution.encoding.as_slice().try_into() {
+	let encoding = match solution.encoding.as_slice().try_into() {
 		Ok(piece) => piece,
 		Err(_) => {
 			return false;
 		}
 	};
-	spartan.is_valid(piece, solution.tag, solution.nonce, ENCODE_ROUNDS)
+	spartan.is_valid(encoding, hash_public_key(&solution.public_key), solution.nonce, ENCODE_ROUNDS)
 }
 
 fn create_hmac(message: &[u8], key: &[u8]) -> [u8; 32] {
@@ -221,4 +221,11 @@ fn genesis_piece_from_seed(seed: &str) -> Piece {
 		chunk.write_all(input.as_ref()).unwrap();
 	}
 	piece
+}
+
+fn hash_public_key(public_key: &AuthorityId) -> [u8; PRIME_SIZE_BYTES] {
+	let mut array = [0u8; PRIME_SIZE_BYTES];
+	let hash = digest::digest(&digest::SHA256, public_key.as_ref());
+	array.copy_from_slice(&hash.as_ref()[..PRIME_SIZE_BYTES]);
+	array
 }
