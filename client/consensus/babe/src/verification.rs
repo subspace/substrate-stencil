@@ -17,10 +17,16 @@
 //! Verification for BABE headers.
 use sp_runtime::{traits::Header, traits::DigestItemFor};
 use sp_consensus_babe::{SlotNumber, AuthorityId};
-use sp_consensus_babe::digests::{PreDigest, CompatibleDigestItem, SpartanPreDigest};
+use sp_consensus_babe::digests::{PreDigest, CompatibleDigestItem, SpartanPreDigest, Solution};
 use sc_consensus_slots::CheckedHeader;
 use log::{debug, trace};
 use super::{find_pre_digest, babe_err, Epoch, BlockT, Error};
+use crate::{SOLUTION_RANGE, Piece, PRIME_SIZE_BYTES, PIECE_SIZE, GENESIS_PIECE_SEED, ENCODE_ROUNDS, SIGNING_CONTEXT, SALT, Tag};
+use spartan::Spartan;
+use ring::{digest, hmac};
+use std::io::Write;
+use std::convert::TryInto;
+use sp_core::Public;
 
 /// BABE verification parameters
 pub(super) struct VerificationParams<'a, B: 'a + BlockT> {
@@ -119,10 +125,107 @@ pub(super) struct VerifiedHeaderInfo<B: BlockT> {
 /// its parent since it is a primary block.
 fn check_primary_header<B: BlockT + Sized>(
 	_pre_hash: B::Hash,
-	_pre_digest: &SpartanPreDigest,
-	_epoch: &Epoch,
+	pre_digest: &SpartanPreDigest,
+	epoch: &Epoch,
 	_c: (u64, u64),
 ) -> Result<(), Error<B>> {
-	// TODO: Actually verify
+	if !is_within_solution_range(
+		&pre_digest.solution,
+		crate::create_challenge(epoch, pre_digest.slot_number),
+		SOLUTION_RANGE,
+	) {
+		panic!("Solution is outside of solution range for slot {}", pre_digest.slot_number);
+	}
+
+	if !is_commitment_valid(&pre_digest.solution) {
+		panic!("Solution commitment is incorrect for slot {}", pre_digest.slot_number);
+	}
+
+	if !is_signature_valid(&pre_digest.solution) {
+		panic!("Solution signature is invalid for slot {}", pre_digest.slot_number);
+	}
+
+	if !is_encoding_valid(&pre_digest.solution) {
+		panic!("Solution encoding is incorrect for slot {}", pre_digest.slot_number);
+	}
+
+	// TODO: Other verification?
+
 	Ok(())
+}
+
+fn is_within_solution_range(solution: &Solution, challenge: [u8; 8], solution_range: u64) -> bool {
+	let target = u64::from_be_bytes(challenge);
+	let tag = u64::from_be_bytes(solution.tag);
+
+	let (lower, is_lower_overflowed) = target.overflowing_sub(solution_range / 2);
+	let (upper, is_upper_overflowed) = target.overflowing_add(solution_range / 2);
+	if is_lower_overflowed || is_upper_overflowed {
+		upper <= tag || tag <= lower
+	} else {
+		lower <= tag && tag <= upper
+	}
+}
+
+fn is_commitment_valid(solution: &Solution) -> bool {
+	let correct_tag: Tag = create_hmac(&solution.encoding, &SALT)[..8].try_into().unwrap();
+	correct_tag == solution.tag
+}
+
+fn is_signature_valid(solution: &Solution) -> bool {
+	// TODO: These should not be created on each verification
+	let ctx = schnorrkel::context::signing_context(SIGNING_CONTEXT);
+	let public_key = match schnorrkel::PublicKey::from_bytes(solution.public_key.as_slice()) {
+		Ok(public_key) => public_key,
+		Err(_) => {
+			return false;
+		}
+	};
+	let signature = match schnorrkel::Signature::from_bytes(&solution.signature) {
+		Ok(signature) => signature,
+		Err(_) => {
+			return false;
+		}
+	};
+	public_key.verify(ctx.bytes(&solution.tag), &signature).is_ok()
+}
+
+fn is_encoding_valid(solution: &Solution) -> bool {
+	// TODO: This should not be created on each verification
+	let spartan: Spartan<PRIME_SIZE_BYTES, PIECE_SIZE> =
+		Spartan::<PRIME_SIZE_BYTES, PIECE_SIZE>::new(genesis_piece_from_seed(GENESIS_PIECE_SEED));
+	let encoding = match solution.encoding.as_slice().try_into() {
+		Ok(piece) => piece,
+		Err(_) => {
+			return false;
+		}
+	};
+	spartan.is_valid(encoding, hash_public_key(&solution.public_key), solution.nonce, ENCODE_ROUNDS)
+}
+
+fn create_hmac(message: &[u8], key: &[u8]) -> [u8; 32] {
+	let key = hmac::Key::new(hmac::HMAC_SHA256, key);
+	let mut array = [0u8; 32];
+	let hmac = hmac::sign(&key, message).as_ref().to_vec();
+	array.copy_from_slice(&hmac[0..32]);
+	array
+}
+
+// TODO: This should be only generated once on startup
+fn genesis_piece_from_seed(seed: &str) -> Piece {
+	// TODO: This is not efficient
+	let mut piece = [0u8; PIECE_SIZE];
+	let mut input = seed.as_bytes().to_vec();
+	for mut chunk in piece.chunks_mut(digest::SHA256.output_len) {
+		input = digest::digest(&digest::SHA256, &input).as_ref().to_vec();
+		chunk.write_all(input.as_ref()).unwrap();
+	}
+	piece
+}
+
+fn hash_public_key(public_key: &AuthorityId) -> [u8; PRIME_SIZE_BYTES] {
+	let mut array = [0u8; PRIME_SIZE_BYTES];
+	let hash = digest::digest(&digest::SHA256, public_key.as_ref());
+	array.copy_from_slice(&hash.as_ref()[..PRIME_SIZE_BYTES]);
+	array
 }
